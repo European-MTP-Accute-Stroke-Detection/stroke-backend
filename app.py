@@ -201,7 +201,7 @@ def visualize_heatmap(heatmap, img, path):
 
 def execute_AI(file, id_model, predict_id):
     
-    os.mkdir('/static/' + predict_id)
+    os.mkdir(os.path.join('/static/' + predict_id))
     data = apply_windowing(file, False)
     data = np.array(data).astype(np.float32)
     
@@ -241,15 +241,15 @@ def execute_AI(file, id_model, predict_id):
 
     imgplot = plt.imshow(mark_boundaries(temp / 2 + 0.5, mask))
     plt.axis('off')
-    plt.savefig('/static/' + predict_id + '/lime.png')
-    print('/static/' + predict_id + '/lime.png')
+    filePath = os.path.join('/static/' + predict_id + '/', "lime.png")
+    plt.savefig(filePath)
+    print(filePath)
     
     
 model_hem = tf.keras.models.load_model('hemorrhage_clf', compile=False)
 model_ischemic = tf.keras.models.load_model('ischemic', compile=False)
 model_combined = tf.keras.models.load_model('Combined', compile=False)
 
-UPLOAD_FOLDER = r'C:\Users\Rotaru Mira\Documents\flask_app\static\images'
 ALLOWED_EXTENSIONS = {'dcm'}
 
 def allowed_file(filename):
@@ -257,7 +257,7 @@ def allowed_file(filename):
 
 # ---------------- Flask API -----------------------
 
-app = Flask(__name__, static_url_path='/static')
+app = Flask(__name__, static_folder=os.path.join('/static'))
 # app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 @app.route('/hemorrhage/predict', methods=['POST'])
@@ -265,8 +265,6 @@ def hemorrhagePredict():
     if 'file' not in request.files:
         return jsonify({'error':'media not provided'}), 400
     file = request.files['file']
-    
-    
     
     id = str(uuid.uuid1())
     
