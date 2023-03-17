@@ -23,10 +23,11 @@ from numpy import asarray
 import matplotlib.cm as cm
 from PIL import Image as im
 
-import keras_tuner
+from lime import lime_image
+from lime.wrappers.scikit_image import SegmentationAlgorithm
+from skimage.segmentation import mark_boundaries
 
 sns.set_theme(style="whitegrid", palette="viridis")
-
 
 def window_image(img, window_center,window_width, intercept, slope, rescale=True):
 
@@ -88,6 +89,7 @@ def convert_pixelarray_to_rgb(image1, image2, image3):
     return image
 
 def apply_windowing(data, plot = True):
+    data = pydicom.read_file(data)
     img = data.pixel_array
     window_center , window_width, intercept, slope = get_windowing(data)
     img2 = window_image(img, 40, 80, intercept, slope)
@@ -181,7 +183,7 @@ def calculate_heatmap(cam, img):
     return cam
 
 
-def visualize_heatmap(heatmap, img):
+def visualize_heatmap(heatmap, img, path):
     
     #data = im.fromarray(heatmap*255)
     #opencvImage = cv2.cvtColor(np.array(heatmap), cv2.COLOR_RGB2BGR)
@@ -191,17 +193,15 @@ def visualize_heatmap(heatmap, img):
     #heatmap = cv2.resize(heatmap, (224, 224))
     imgplot = plt.imshow(heatmap)
     plt.axis('off')
-    plt.savefig('cam.png')
+    plt.savefig(path + '/cam.png')
     
     #plt.show()
 
-from lime import lime_image
-from lime.wrappers.scikit_image import SegmentationAlgorithm
-from skimage.segmentation import mark_boundaries
 
 
-
-def execute_AI(file, id_model):
+def execute_AI(file, id_model, predict_id):
+    
+    os.mkdir('/static/' + predict_id)
     data = apply_windowing(file, False)
     data = np.array(data).astype(np.float32)
     
@@ -221,7 +221,7 @@ def execute_AI(file, id_model):
     
     heatmap = make_gradcam_heatmap(np.expand_dims(data, axis=0), local_model, "conv2d_3", combined)
     #cam_heatmap = calculate_heatmap(heatmap, np.expand_dims(data, axis=0))
-    visualize_heatmap(heatmap, data)
+    visualize_heatmap(heatmap, data, ('/static/' + predict_id))
     
     explainer = lime_image.LimeImageExplainer() 
 
@@ -241,12 +241,13 @@ def execute_AI(file, id_model):
 
     imgplot = plt.imshow(mark_boundaries(temp / 2 + 0.5, mask))
     plt.axis('off')
-    plt.savefig('lime.png')
+    plt.savefig('/static/' + predict_id + '/lime.png')
+    print('/static/' + predict_id + '/lime.png')
     
     
-model_hem = tf.keras.models.load_model('hemorrhage_clf')
-model_ischemic = tf.keras.models.load_model('ischemic')
-model_combined = tf.keras.models.load_model('Combined')
+model_hem = tf.keras.models.load_model('hemorrhage_clf', compile=False)
+model_ischemic = tf.keras.models.load_model('ischemic', compile=False)
+model_combined = tf.keras.models.load_model('Combined', compile=False)
 
 UPLOAD_FOLDER = r'C:\Users\Rotaru Mira\Documents\flask_app\static\images'
 ALLOWED_EXTENSIONS = {'dcm'}
@@ -254,69 +255,65 @@ ALLOWED_EXTENSIONS = {'dcm'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
 
-app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# ---------------- Flask API -----------------------
 
-@app.route('/hemmorrhage/prediction', methods=['GET','POST'])
-def upload_file():
+app = Flask(__name__, static_url_path='/static')
+# app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+@app.route('/hemorrhage/predict', methods=['POST'])
+def hemorrhagePredict():
     if 'file' not in request.files:
         return jsonify({'error':'media not provided'}), 400
     file = request.files['file']
     
-    execute_AI(file, 1)
     
+    
+    id = str(uuid.uuid1())
+    
+    execute_AI(file, 1, id)
     
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'],filename))
-        #file_path = os.path.join(app.config['UPLOAD_FOLDER'],filename)
-        #print('File path' + file_path)
-        #print(f'File size in Bytes: {os.path.getsize(file_path)}' )
-        return jsonify({"message": 'file successfully uploaded'})
+        return jsonify({"predictionId": id})
 
-@app.route('/hemmoraghe/ischemic', methods=['GET','POST'])
-def upload_file():
+@app.route('/ischemic/predict', methods=['POST'])
+def ischemicPredict():
     if 'file' not in request.files:
         return jsonify({'error':'media not provided'}), 400
     file = request.files['file']
     
-    execute_AI(file, 2)
+    print(file)
+    
+    id = str(uuid.uuid1())
+        
+    execute_AI(file, 2, id)
     
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'],filename))
-        #file_path = os.path.join(app.config['UPLOAD_FOLDER'],filename)
-        #print('File path' + file_path)
-        #print(f'File size in Bytes: {os.path.getsize(file_path)}' )
-        return jsonify({"message": 'file successfully uploaded'})
+        return jsonify({"predictionId": id})
 
-@app.route('/hemmoraghe/combined', methods=['GET','POST'])
-def upload_file():
+@app.route('/combined/predict', methods=['POST'])
+def combinedPredict():
     if 'file' not in request.files:
         return jsonify({'error':'media not provided'}), 400
     file = request.files['file']
     
-    execute_AI(file, 3)
+    id = str(uuid.uuid1())
+    
+    execute_AI(file, 3, id)
     
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'],filename))
-        #file_path = os.path.join(app.config['UPLOAD_FOLDER'],filename)
-        #print('File path' + file_path)
-        #print(f'File size in Bytes: {os.path.getsize(file_path)}' )
-        return jsonify({"message": 'file successfully uploaded'})
+        return jsonify({"predictionId": id})
 
-@app.route('/reports/<path:path>')
-def send_report(metadata): 
-    id = uuid.uuid1()
-    json_str = json.dumps(metadata)
-    return send_from_directory('reports',path)
+# @app.route('/reports/<path:path>')
+# def send_report(metadata): 
+#     id = uuid.uuid1()
+#     json_str = json.dumps(metadata)
+#     return send_from_directory('reports',path)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
