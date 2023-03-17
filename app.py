@@ -243,6 +243,49 @@ def execute_AI(file, id_model, predict_id):
     plt.axis('off')
     plt.savefig('/static/' + predict_id + '/lime.png')
     print('/static/' + predict_id + '/lime.png')
+
+    if id_model == 1:
+        if prediction.max() > 0:
+            x = {
+                "result": "Hemorrhage Stroke Detected",
+                "prediction": prediction
+                }
+        else:
+            x = {
+                "result": "No Hemorrhage Stroke Detected",
+                "prediction": prediction
+                }
+    elif id_model == 2:
+        if prediction.max() > 0:
+            x = {
+                "result": "Ischemic Stroke Detected",
+                "prediction": prediction
+                }
+        else:
+            x = {
+                "result": "No Ischemic Stroke Detected",
+                "prediction": prediction
+                }
+    else:
+        if np.argmax(prediction) == 0:
+            x = {
+                "result": "No Stroke Detected",
+                "prediction": prediction
+                }
+        elif np.argmax(prediction) == 1:
+            x = {
+                "result": "Hemorrhage Stroke Detected",
+                "prediction": prediction
+                }
+        else:
+            x = {
+                "result": "Ischemic Stroke Detected",
+                "prediction": prediction
+                }
+
+    json_string = json.dumps(x)
+    with open('/static/' + predict_id + '/result.json', 'w') as outfile:
+        outfile.write(json_string)
     
     
 model_hem = tf.keras.models.load_model('hemorrhage_clf', compile=False)
