@@ -4,6 +4,7 @@ import base64
 import uuid
 from flask import Flask, request, jsonify, flash, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
+from flask_cors import CORS, cross_origin
 
 import pandas as pd  
 import pydicom, numpy as np
@@ -194,7 +195,7 @@ def visualize_heatmap(heatmap, img, path):
     imgplot = plt.imshow(heatmap)
     plt.axis('off')
     plt.savefig(path + '/cam.png')
-    
+    plt.close()
     #plt.show()
 
 
@@ -243,44 +244,45 @@ def execute_AI(file, id_model, predict_id):
     plt.axis('off')
     plt.savefig('/static/' + predict_id + '/lime.png')
     print('/static/' + predict_id + '/lime.png')
+    plt.close()
 
     if id_model == 1:
         if prediction.max() > 0:
             x = {
                 "result": "Hemorrhage Stroke Detected",
-                "prediction": prediction
+                "prediction": str(prediction)
                 }
         else:
             x = {
                 "result": "No Hemorrhage Stroke Detected",
-                "prediction": prediction
+                "prediction": str(prediction)
                 }
     elif id_model == 2:
         if prediction.max() > 0:
             x = {
                 "result": "Ischemic Stroke Detected",
-                "prediction": prediction
+                "prediction": str(prediction)
                 }
         else:
             x = {
                 "result": "No Ischemic Stroke Detected",
-                "prediction": prediction
+                "prediction": str(prediction)
                 }
     else:
         if np.argmax(prediction) == 0:
             x = {
                 "result": "No Stroke Detected",
-                "prediction": prediction
+                "prediction": str(prediction)
                 }
         elif np.argmax(prediction) == 1:
             x = {
                 "result": "Hemorrhage Stroke Detected",
-                "prediction": prediction
+                "prediction": str(prediction)
                 }
         else:
             x = {
                 "result": "Ischemic Stroke Detected",
-                "prediction": prediction
+                "prediction": str(prediction)
                 }
 
     json_string = json.dumps(x)
@@ -301,6 +303,8 @@ def allowed_file(filename):
 
 app = Flask(__name__, static_folder=os.path.join('/static'))
 # app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+cors = CORS(app, resources={r"*": {"origins": "*"}})
+app.config['CORS_HEADERS'] = 'Content-Type'
 
 @app.route('/hemorrhage/predict', methods=['POST'])
 def hemorrhagePredict():
@@ -313,9 +317,9 @@ def hemorrhagePredict():
     execute_AI(file, 1, id)
     
     if file.filename == '':
-        return jsonify({'error': 'no file uploaded'}), 400
+        response = jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
-        return jsonify({"predictionId": id})
+         return jsonify({"predictionId": id})
 
 @app.route('/ischemic/predict', methods=['POST'])
 def ischemicPredict():
@@ -332,7 +336,7 @@ def ischemicPredict():
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
-        return jsonify({"predictionId": id})
+         return jsonify({"predictionId": id})
 
 @app.route('/combined/predict', methods=['POST'])
 def combinedPredict():
