@@ -20,7 +20,7 @@ import tensorflow as tf
 from autokeras.keras_layers import CastToFloat32
 from tensorflow import keras
 from skimage import morphology
-from joblib import load
+import joblib
 
 from keras.preprocessing import image
 from numpy import asarray
@@ -38,7 +38,7 @@ model_hem = tf.keras.models.load_model('hemorrhage_clf', compile=False)
 model_ischemic = tf.keras.models.load_model('New_models/Ischemic', compile=False)
 model_combined = tf.keras.models.load_model('New_models/Combined', compile=False)
 
-pipeline = load('filename.joblib') 
+pipeline = joblib.load('stroke-prediction/model.joblib') 
 
 ALLOWED_EXTENSIONS = {'dcm'}
 
@@ -101,25 +101,13 @@ def combinedPredict():
     
 
 @app.route('/tabular/predict', methods=['POST'])
-def combinedPredict():
-    if 'file' not in request.files:
-        return jsonify({'error':'media not provided'}), 400
-    file = request.files['file']
+def tabularPredict():
     
-    id = str(uuid.uuid1())
+    X = pd.DataFrame(request.json)
+      
+    result: list = pipeline.predict(X)
     
-    evaluation = execute_tabular_AI(file, pipeline)
-    
-    if file.filename == '':
-        return jsonify({'error': 'no file uploaded'}), 400
-    elif file and allowed_file(file.filename):
-        return jsonify({"predictionId": id})
-
-# @app.route('/reports/<path:path>')
-# def send_report(metadata): 
-#     id = uuid.uuid1()
-#     json_str = json.dumps(metadata)
-#     return send_from_directory('reports',path)
+    return jsonify({"result": int(result[0])})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

@@ -420,9 +420,3 @@ def execute_AI(file, id_model, local_model, layer, predict_id):
     json_string = json.dumps(x)
     with open('static/' + predict_id + '/result.json', 'w') as outfile:
         outfile.write(json_string)
-
-def execute_tabular_AI(file, pipeline):
-    
-    to_eval_df = pd.read_json(file, orient='split')
-
-    return pipeline.predict(to_eval_df)
