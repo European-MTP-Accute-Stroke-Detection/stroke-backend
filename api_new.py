@@ -307,11 +307,12 @@ def calculate_heatmap(cam, img, predict_id):
 
     # Save the superimposed image
     # Display Grad CAM
-    #print(np.array(superimposed_img))
+    #print(np.array(superimposed_img))#
+    plt.figure(frameon=False)
     imgplot = plt.imshow(superimposed_img)
 
     plt.axis('off')
-    plt.savefig(prefix + 'static/' + predict_id + '/cam.png')
+    plt.savefig(prefix + 'static/' + predict_id + '/cam.png', bbox_inches = 'tight')
     plt.close()
     
     return imgplot
@@ -322,7 +323,8 @@ def visualize_heatmap(heatmap, img, path):
     #print(heatmap.shape)
     heatmap = np.array(Image.fromarray(np.uint8(heatmap * 255) , 'L'))
     #print(heatmap.shape)
-    imgplot = plt.imshow(heatmap)
+    plt.figure(frameon=False)
+    plt.imshow(heatmap)
     plt.axis('off')
     #plt.savefig('cam.png')
     
@@ -351,7 +353,7 @@ def plotLIME(model, data, prediction, predict_id):
     
     imgplot = plt.imshow(lime_res)
     plt.axis('off')
-    plt.savefig(prefix + 'static/' + predict_id + '/lime.png')
+    plt.savefig(prefix + 'static/' + predict_id + '/lime.png', bbox_inches = 'tight')
     plt.close()
 
 ##########################################################################################
@@ -364,10 +366,10 @@ def execute_AI(file, id_model, local_model, layer, predict_id):
     os.mkdir(path)
     data = apply_windowing(file, False)
     data = np.array(data).astype(np.float32)
-    
+    plt.figure(frameon=False)
     imgplot = plt.imshow(data)
     plt.axis('off')
-    plt.savefig(prefix + 'static/' + predict_id + '/scan.png')
+    plt.savefig(prefix + 'static/' + predict_id + '/scan.png', bbox_inches = 'tight')
     plt.close()
 
     prediction = local_model.predict(np.expand_dims(data, axis=0))
