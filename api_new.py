@@ -1,6 +1,5 @@
 import os
 import json
-import uuid
 from flask import Flask, request, jsonify, flash, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
 from flask_cors import CORS, cross_origin
@@ -26,6 +25,7 @@ from keras.preprocessing import image
 from numpy import asarray
 import matplotlib.cm as cm
 from PIL import Image as im
+import platform
 
 from lime import lime_image
 from lime.wrappers.scikit_image import SegmentationAlgorithm
@@ -35,6 +35,8 @@ from skimage.segmentation import mark_boundaries, slic
 ##########################################################################################
 ########################### Preprocessing ################################################
 ##########################################################################################
+
+prefix = '/' if platform.system() == 'Windows' else ''
 
 def transform_to_hu(img, intercept, slope):
     hu_image = img * slope + intercept
@@ -309,7 +311,7 @@ def calculate_heatmap(cam, img, predict_id):
     imgplot = plt.imshow(superimposed_img)
 
     plt.axis('off')
-    plt.savefig('static/' + predict_id + '/cam.png')
+    plt.savefig(prefix + 'static/' + predict_id + '/cam.png')
     plt.close()
     
     return imgplot
@@ -349,7 +351,7 @@ def plotLIME(model, data, prediction, predict_id):
     
     imgplot = plt.imshow(lime_res)
     plt.axis('off')
-    plt.savefig('static/' + predict_id + '/lime.png')
+    plt.savefig(prefix + 'static/' + predict_id + '/lime.png')
     plt.close()
 
 ##########################################################################################
@@ -358,14 +360,14 @@ def plotLIME(model, data, prediction, predict_id):
 
 def execute_AI(file, id_model, local_model, layer, predict_id):
     
-    path = (os.path.join('static/' + str(predict_id)))
+    path = (os.path.join(prefix +'static/' + str(predict_id)))
     os.mkdir(path)
     data = apply_windowing(file, False)
     data = np.array(data).astype(np.float32)
     
     imgplot = plt.imshow(data)
     plt.axis('off')
-    plt.savefig('static/' + predict_id + '/scan.png')
+    plt.savefig(prefix + 'static/' + predict_id + '/scan.png')
     plt.close()
 
     prediction = local_model.predict(np.expand_dims(data, axis=0))
@@ -418,5 +420,5 @@ def execute_AI(file, id_model, local_model, layer, predict_id):
                 }
 
     json_string = json.dumps(x)
-    with open('static/' + predict_id + '/result.json', 'w') as outfile:
+    with open(prefix + 'static/' + predict_id + '/result.json', 'w') as outfile:
         outfile.write(json_string)

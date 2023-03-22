@@ -1,35 +1,12 @@
 import os
-import json
 import uuid
-from flask import Flask, request, jsonify, flash, redirect, url_for, send_from_directory
-from werkzeug.utils import secure_filename
-from flask_cors import CORS, cross_origin
-import pylibjpeg
-import scipy.ndimage as ndi
-import pandas as pd  
-import pydicom, numpy as np
-import matplotlib.pylab as plt
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import pandas as pd
 import os
 import seaborn as sns
-from random import randrange
-from tqdm.notebook import tqdm
-import pickle
-import cv2
-from PIL import Image
 import tensorflow as tf
-from autokeras.keras_layers import CastToFloat32
-from tensorflow import keras
-from skimage import morphology
 import joblib
-
-from keras.preprocessing import image
-from numpy import asarray
-import matplotlib.cm as cm
-from PIL import Image as im
-
-from lime import lime_image
-from lime.wrappers.scikit_image import SegmentationAlgorithm
-from skimage.segmentation import mark_boundaries, slic
 from api_new import *
 
 sns.set_theme(style="whitegrid", palette="viridis")
@@ -110,4 +87,11 @@ def tabularPredict():
     return jsonify({"result": int(result[0])})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # This is used when running locally only. When deploying to Google App
+    # Engine, a webserver process such as Gunicorn will serve the app. This
+    # can be configured by adding an `entrypoint` to app.yaml.
+    # Flask's development server will automatically serve static files in
+    # the "static" directory. See:
+    # http://flask.pocoo.org/docs/1.0/quickstart/#static-files. Once deployed,
+    # App Engine itself will serve those files as configured in app.yaml.
+    app.run(host='127.0.0.1', port=8080, debug=True)
