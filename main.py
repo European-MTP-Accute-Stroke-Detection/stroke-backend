@@ -7,7 +7,7 @@ import os
 import seaborn as sns
 import tensorflow as tf
 import joblib
-from api_new import *
+from api_AI import *
 
 sns.set_theme(style="whitegrid", palette="viridis")
     
@@ -60,6 +60,77 @@ def ischemicPredict():
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
          return jsonify({"predictionId": id})
+    
+
+@app.route('/ischemic/explain/<xai_id>/', methods=['POST'])
+def ischemicExplain(xai_id):
+    if 'file' not in request.files:
+        return jsonify({'error':'media not provided'}), 400
+    file = request.files['file']
+        
+    id = str(uuid.uuid1())
+    print('ischemic')
+        
+    #explain_AI(file, 2, model_ischemic, id, "lime")
+
+    xai_id_method, xai_id_complexity = get_XAI_info(xai_id)
+
+    if xai_id_method == "lime":
+        explain_AI(file, 'lime', 2, xai_id_complexity, model_ischemic, 'conv2d_3',id)
+    else:
+        explain_AI(file, 'grad-cam', 2, xai_id_complexity, model_ischemic, 'conv2d_3',id)
+    
+    
+    if file.filename == '':
+        return jsonify({'error': 'no file uploaded'}), 400
+    elif file and allowed_file(file.filename):
+         return jsonify({"predictionId": id})
+    
+@app.route('/combined/explain/<xai_id>/', methods=['POST'])
+def combinedExplain(xai_id):
+    if 'file' not in request.files:
+        return jsonify({'error':'media not provided'}), 400
+    file = request.files['file']
+        
+    id = str(uuid.uuid1())
+    print(xai_id)
+
+    xai_id_method, xai_id_complexity = get_XAI_info(xai_id)
+
+    if xai_id_method == "lime":
+        explain_AI(file, 'lime', 0, xai_id_complexity, model_combined, 'separable_conv2d_2',id)
+    else:
+        explain_AI(file, 'grad-cam', 0, xai_id_complexity, model_combined, 'separable_conv2d_2',id)
+    
+    if file.filename == '':
+        return jsonify({'error': 'no file uploaded'}), 400
+    elif file and allowed_file(file.filename):
+         return jsonify({"predictionId": id})
+
+@app.route('/hemorrhage/explain/<xai_id>/', methods=['POST'])
+def hemorrhageExplain(xai_id):
+    if 'file' not in request.files:
+        return jsonify({'error':'media not provided'}), 400
+    file = request.files['file']
+        
+    id = str(uuid.uuid1())
+    print('hemmo')
+
+    xai_id_method, xai_id_complexity = get_XAI_info(xai_id)
+
+    if xai_id_method == "lime":
+        explain_AI(file, 'lime', 1, xai_id_complexity, model_hem, 'conv2d_3',id)
+    else:
+        explain_AI(file, 'grad-cam', 1, xai_id_complexity, model_hem, 'conv2d_3',id)
+    
+        
+    #explain_AI(file, 2, model_ischemic, id, "lime")
+    
+    if file.filename == '':
+        return jsonify({'error': 'no file uploaded'}), 400
+    elif file and allowed_file(file.filename):
+         return jsonify({"predictionId": id})
+
 
 @app.route('/combined/predict', methods=['POST'])
 def combinedPredict():
