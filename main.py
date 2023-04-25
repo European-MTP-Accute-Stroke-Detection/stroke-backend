@@ -8,6 +8,8 @@ import seaborn as sns
 import tensorflow as tf
 import joblib
 from api_AI import *
+from Utilities.db_functions import *
+from Utilities.xai_functions import *
 
 sns.set_theme(style="whitegrid", palette="viridis")
     
@@ -17,6 +19,7 @@ model_combined = tf.keras.models.load_model('New_models/Combined', compile=False
 
 pipeline = joblib.load('stroke-prediction/model.joblib') 
 
+
 ALLOWED_EXTENSIONS = {'dcm'}
 
 def allowed_file(filename):
@@ -24,6 +27,7 @@ def allowed_file(filename):
 
 # ---------------- Flask API -----------------------
 
+print(os.path.join('/static'))
 app = Flask(__name__, static_folder=os.path.join('/static'))
 # app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 cors = CORS(app, resources={r"*": {"origins": "*"}})
@@ -37,7 +41,9 @@ def hemorrhagePredict():
     
     id = str(uuid.uuid1())
     
-    execute_AI(file, 1, model_hem, "conv2d_3", id)
+    static_path = execute_AI(file, 1, model_hem, "conv2d_3", id)
+
+    store_results(static_path, id)
     
     if file.filename == '':
         response = jsonify({'error': 'no file uploaded'}), 400
@@ -54,8 +60,9 @@ def ischemicPredict():
     
     id = str(uuid.uuid1())
         
-    execute_AI(file, 2, model_ischemic, 'conv2d_3', id)
-    
+    static_path = execute_AI(file, 2, model_ischemic, 'conv2d_3', id)
+    store_results(static_path, id)
+
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
@@ -76,10 +83,10 @@ def ischemicExplain(xai_id):
     xai_id_method, xai_id_complexity = get_XAI_info(xai_id)
 
     if xai_id_method == "lime":
-        explain_AI(file, 'lime', 2, xai_id_complexity, model_ischemic, 'conv2d_3',id)
+        static_path = explain_AI(file, 'lime', 2, xai_id_complexity, model_ischemic, 'conv2d_3',id)
     else:
-        explain_AI(file, 'grad-cam', 2, xai_id_complexity, model_ischemic, 'conv2d_3',id)
-    
+        static_path = explain_AI(file, 'grad-cam', 2, xai_id_complexity, model_ischemic, 'conv2d_3',id)
+    store_results(static_path, id)
     
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
@@ -98,10 +105,11 @@ def combinedExplain(xai_id):
     xai_id_method, xai_id_complexity = get_XAI_info(xai_id)
 
     if xai_id_method == "lime":
-        explain_AI(file, 'lime', 0, xai_id_complexity, model_combined, 'separable_conv2d_2',id)
+        static_path = explain_AI(file, 'lime', 0, xai_id_complexity, model_combined, 'separable_conv2d_2',id)
     else:
-        explain_AI(file, 'grad-cam', 0, xai_id_complexity, model_combined, 'separable_conv2d_2',id)
-    
+        static_path = explain_AI(file, 'grad-cam', 0, xai_id_complexity, model_combined, 'separable_conv2d_2',id)
+    store_results(static_path, id)
+
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
@@ -119,10 +127,10 @@ def hemorrhageExplain(xai_id):
     xai_id_method, xai_id_complexity = get_XAI_info(xai_id)
 
     if xai_id_method == "lime":
-        explain_AI(file, 'lime', 1, xai_id_complexity, model_hem, 'conv2d_3',id)
+        static_path = explain_AI(file, 'lime', 1, xai_id_complexity, model_hem, 'conv2d_3',id)
     else:
-        explain_AI(file, 'grad-cam', 1, xai_id_complexity, model_hem, 'conv2d_3',id)
-    
+        static_path = explain_AI(file, 'grad-cam', 1, xai_id_complexity, model_hem, 'conv2d_3',id)
+    store_results(static_path, id)
         
     #explain_AI(file, 2, model_ischemic, id, "lime")
     
@@ -140,8 +148,9 @@ def combinedPredict():
     
     id = str(uuid.uuid1())
     
-    execute_AI(file, 3, model_combined, 'separable_conv2d_2',id)
-    
+    static_path = execute_AI(file, 3, model_combined, 'separable_conv2d_2',id)
+    store_results(static_path, id)
+
     if file.filename == '':
         return jsonify({'error': 'no file uploaded'}), 400
     elif file and allowed_file(file.filename):
@@ -152,10 +161,17 @@ def combinedPredict():
 def tabularPredict():
     
     X = pd.DataFrame(request.json)
+
+    save_tabular_data_patient(X.to_dict(orient='index')[0], 'test_id')
       
+    print("johooo")
     result: list = pipeline.predict(X)
+
+    return_json = jsonify({"result": int(result[0])})
+    print(return_json)
     
-    return jsonify({"result": int(result[0])})
+    return return_json
+
 
 if __name__ == '__main__':
     # This is used when running locally only. When deploying to Google App
