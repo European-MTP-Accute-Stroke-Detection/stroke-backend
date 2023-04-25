@@ -1,10 +1,7 @@
 from werkzeug.utils import secure_filename
-from flask_cors import CORS, cross_origin
-import pylibjpeg
 from pydicom import dcmread
 import torch
 from torch import nn
-import scipy.ndimage as ndi
 import pandas as pd  
 import pydicom, numpy as np
 import matplotlib.pylab as plt
@@ -15,9 +12,9 @@ from tqdm.notebook import tqdm
 import platform
 from PIL import Image
 import tensorflow as tf
-from autokeras.keras_layers import CastToFloat32
 from tensorflow import keras
 from copy import copy, deepcopy
+import sklearn
 
 from keras.preprocessing import image
 from numpy import asarray
@@ -26,7 +23,11 @@ from PIL import Image as im
 from lime import lime_image
 from lime.wrappers.scikit_image import SegmentationAlgorithm
 from skimage.segmentation import mark_boundaries
+from skimage import morphology
 import shap
+from functools import partial
+from sklearn.utils import check_random_state
+from lime import lime_base
 
 prefix = '/' if platform.system() == 'Windows' else ''
 
@@ -117,7 +118,7 @@ def visualize_heatmap(heatmap, img, path):
     plt.close()
 
 
-def plotLIME(model, data, prediction, predict_id):
+def plotLIME(model, data, prediction, complexity, predict_id):
     explainer = lime_image.LimeImageExplainer() 
 
     segmenter = SegmentationAlgorithm('slic', n_segments=200, compactness=8, sigma=1,
@@ -126,7 +127,7 @@ def plotLIME(model, data, prediction, predict_id):
                                          classifier_fn = model, 
                                          top_labels=3, 
                                          hide_color=0, # 0 - gray 
-                                         num_samples=1000,
+                                         num_samples=complexity,
                                          segmentation_fn=segmenter
                                         )
     temp, mask = explanation_1.get_image_and_mask(explanation_1.top_labels[np.argmax(prediction)], 
@@ -140,7 +141,6 @@ def plotLIME(model, data, prediction, predict_id):
     plt.axis('off')
     plt.savefig(prefix + 'static/' + predict_id + '/lime.png', bbox_inches = 'tight')
     plt.close()
-
 
 
 class ImageExplanation(object):
@@ -604,3 +604,14 @@ class LimeImageExplainer_torch(object):
         return result
 
 
+def get_XAI_info(xai_id):
+    xai_id_method, xai_id_complexity = xai_id.split('_')
+
+    if xai_id_complexity == "low":
+        xai_id_complexity = 100
+    elif xai_id_complexity == "medium":
+        xai_id_complexity = 500
+    else:
+        xai_id_complexity = 1000
+
+    return xai_id_method, xai_id_complexity
