@@ -8,13 +8,16 @@ import matplotlib.pylab as plt
 import os
 import seaborn as sns
 from random import randrange
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 import platform
 from PIL import Image
 import tensorflow as tf
 from tensorflow import keras
-from copy import copy, deepcopy
+#from copy import copy, deepcopy
 import sklearn
+import math
+import copy
+
 
 from keras.preprocessing import image
 from numpy import asarray
@@ -101,7 +104,7 @@ def calculate_heatmap(cam, img, predict_id):
     #plt.savefig(prefix + 'static/' + predict_id + '/cam.png', bbox_inches = 'tight')
     #plt.close()
     
-    return np.asarray(superimposed_img)
+    return np.asarray(jet_heatmap)
 
 
 def visualize_heatmap(heatmap, img, path):
@@ -118,14 +121,19 @@ def visualize_heatmap(heatmap, img, path):
     plt.close()
 
 
-def plotLIME(model, data, prediction, complexity, predict_id):
-    explainer = lime_image.LimeImageExplainer() 
+def plotLIME(model, data, prediction, complexity, torch = False):
+    if torch:
+        explainer = LimeImageExplainer_torch() 
+        m = nn.Softmax()
+        prediction = m(prediction).cpu().detach().numpy()
+    else:
+        explainer = LimeImageExplainer()        
 
-    segmenter = SegmentationAlgorithm('slic', n_segments=200, compactness=8, sigma=1,
+    segmenter = SegmentationAlgorithm('slic', n_segments=200, compactness=5, sigma=1,
                      start_label=1)
     explanation_1 = explainer.explain_instance(data, 
                                          classifier_fn = model, 
-                                         top_labels=3, 
+                                         top_labels=5, 
                                          hide_color=0, # 0 - gray 
                                          num_samples=complexity,
                                          segmentation_fn=segmenter
@@ -134,13 +142,15 @@ def plotLIME(model, data, prediction, complexity, predict_id):
                                                 positive_only=True, 
                                                 num_features=5, 
                                                 hide_rest=False)
+
     lime_res = mark_boundaries(temp, mask, mode = "thick", color = (255,0,0))
-    #print(np.max(temp))
     
-    imgplot = plt.imshow(lime_res)
-    plt.axis('off')
-    plt.savefig(prefix + 'static/' + predict_id + '/lime.png', bbox_inches = 'tight')
-    plt.close()
+    #imgplot = plt.imshow(lime_res)
+    
+    #plt.axis('off')
+    #plt.savefig(prefix + 'static/' + predict_id + '/'+name+'.png', bbox_inches = 'tight')
+    #plt.close()
+    return mask
 
 
 class ImageExplanation(object):
@@ -213,7 +223,6 @@ class ImageExplanation(object):
                 temp[segments == f] = image[segments == f].copy()
                 temp[segments == f, c] = np.max(image)
             return temp, mask
-        
         
 class LimeImageExplainer(object):
     """Explains predictions on Image (i.e. matrix) data.
@@ -577,11 +586,11 @@ class LimeImageExplainer_torch(object):
             imgs.append(np.array(temp_))
             if len(imgs) == batch_size:
                 #print(np.array(imgs).shape)
-                preds = classifier_fn(torch.from_numpy(np.array(imgs)))
+                preds = classifier_fn(torch.squeeze(torch.from_numpy(np.array(imgs))))
                 labels.extend(preds)
                 imgs = []
         if len(imgs) > 0:
-            preds = classifier_fn(torch.from_numpy(np.array(imgs)))
+            preds = classifier_fn(torch.squeeze(torch.torch.from_numpy(np.array(imgs))))
             labels.extend(preds)
             
         final_labels = []
@@ -591,17 +600,16 @@ class LimeImageExplainer_torch(object):
         
         #print(final_labels)
         return data, np.array(final_labels)
-    
 
-    def get_SHAP_values(explainer, data):
-        shap_values = explainer.shap_values(data)
+def get_SHAP_values(explainer, data):
+    shap_values = explainer.shap_values(data)
 
-        shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in shap_values]
-        test_numpy = np.swapaxes(np.swapaxes(data.numpy(), 1, -1), 1, 2)
+    shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in shap_values]
+    test_numpy = np.swapaxes(np.swapaxes(data.numpy(), 1, -1), 1, 2)
 
-        result = shap.image_plot(shap_numpy[0], -test_numpy)
+    result = shap.image_plot(shap_numpy[0], -test_numpy)
 
-        return result
+    return result
 
 
 def get_XAI_info(xai_id):
@@ -615,3 +623,92 @@ def get_XAI_info(xai_id):
         xai_id_complexity = 1000
 
     return xai_id_method, xai_id_complexity
+
+
+
+
+######### Uncertainty Quantification
+
+
+# Link: https://github.com/ondrejbohdal/meta-calibration/blob/main/Metrics/metrics.py
+
+COUNT = 'count'
+CONF = 'conf'
+ACC = 'acc'
+BIN_ACC = 'bin_acc'
+BIN_CONF = 'bin_conf'
+
+
+def _bin_initializer(bin_dict, num_bins=10):
+    for i in range(num_bins):
+        bin_dict[i][COUNT] = 0
+        bin_dict[i][CONF] = 0
+        bin_dict[i][ACC] = 0
+        bin_dict[i][BIN_ACC] = 0
+        bin_dict[i][BIN_CONF] = 0
+
+
+def _populate_bins(confs, preds, labels, num_bins=10):
+    bin_dict = {}
+    for i in range(num_bins):
+        bin_dict[i] = {}
+    _bin_initializer(bin_dict, num_bins)
+    num_test_samples = len(confs)
+
+    for i in range(0, num_test_samples):
+        confidence = confs[i]
+        prediction = preds[i]
+        label = labels[i]
+        binn = int(math.ceil(((num_bins * confidence) - 1)))
+        bin_dict[binn][COUNT] = bin_dict[binn][COUNT] + 1
+        bin_dict[binn][CONF] = bin_dict[binn][CONF] + confidence
+        bin_dict[binn][ACC] = bin_dict[binn][ACC] + \
+            (1 if (label == prediction) else 0)
+
+    for binn in range(0, num_bins):
+        if (bin_dict[binn][COUNT] == 0):
+            bin_dict[binn][BIN_ACC] = 0
+            bin_dict[binn][BIN_CONF] = 0
+        else:
+            bin_dict[binn][BIN_ACC] = float(
+                bin_dict[binn][ACC]) / bin_dict[binn][COUNT]
+            bin_dict[binn][BIN_CONF] = bin_dict[binn][CONF] / \
+                float(bin_dict[binn][COUNT])
+    return bin_dict
+
+
+def expected_calibration_error(confs, preds, labels, num_bins=10):
+    bin_dict = _populate_bins(confs, preds, labels, num_bins)
+    num_samples = len(labels)
+    ece = 0
+    for i in range(num_bins):
+        bin_accuracy = bin_dict[i][BIN_ACC]
+        bin_confidence = bin_dict[i][BIN_CONF]
+        bin_count = bin_dict[i][COUNT]
+        ece += (float(bin_count) / num_samples) * \
+            abs(bin_accuracy - bin_confidence)
+    return ece
+
+
+def maximum_calibration_error(confs, preds, labels, num_bins=10):
+    bin_dict = _populate_bins(confs, preds, labels, num_bins)
+    ce = []
+    for i in range(num_bins):
+        bin_accuracy = bin_dict[i][BIN_ACC]
+        bin_confidence = bin_dict[i][BIN_CONF]
+        ce.append(abs(bin_accuracy - bin_confidence))
+    return max(ce)
+
+
+def average_calibration_error(confs, preds, labels, num_bins=10):
+    bin_dict = _populate_bins(confs, preds, labels, num_bins)
+    non_empty_bins = 0
+    ace = 0
+    for i in range(num_bins):
+        bin_accuracy = bin_dict[i][BIN_ACC]
+        bin_confidence = bin_dict[i][BIN_CONF]
+        bin_count = bin_dict[i][COUNT]
+        if bin_count > 0:
+            non_empty_bins += 1
+        ace += abs(bin_accuracy - bin_confidence)
+    return ace / float(non_empty_bins)
