@@ -18,7 +18,7 @@ sns.set_theme(style="whitegrid", palette="viridis")
 model_hem = tf.keras.models.load_model('hemorrhage_clf', compile=False)
 model_ischemic = tf.keras.models.load_model('New_models/Ischemic', compile=False)
 model_combined = tf.keras.models.load_model('New_models/Combined', compile=False)
-model_torch = torch.load("New_models/torch_test/efficientnet_v2_l.ckpt", map_location='cpu')
+# model_torch = torch.load("New_models/torch_test/efficientnet_v2_l.ckpt", map_location='cpu')
 
 pipeline = joblib.load('stroke-prediction/model.joblib') 
 

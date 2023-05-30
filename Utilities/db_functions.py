@@ -5,7 +5,7 @@ import os
 import json
 
 
-firebase_key = 'ServiceAccountKey/brainwatch-14583-firebase-adminsdk-67n85-bd47564c3e.json'
+firebase_key = 'ServiceAccountKey/brainwatch-14583-firebase-adminsdk-67n85-57a14dcb73.json'
 cred = credentials.Certificate(firebase_key)
 app_firebase = firebase_admin.initialize_app(cred,{'storageBucket': 'brainwatch-14583.appspot.com'}) # connecting to firebase
 db = firestore.client()
