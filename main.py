@@ -18,7 +18,7 @@ sns.set_theme(style="whitegrid", palette="viridis")
 model_hem = tf.keras.models.load_model('hemorrhage_clf', compile=False)
 model_ischemic = tf.keras.models.load_model('New_models/Ischemic', compile=False)
 model_combined = tf.keras.models.load_model('New_models/Combined', compile=False)
-# model_torch = torch.load("New_models/torch_test/efficientnet_v2_l.ckpt", map_location='cpu')
+model_torch = torch.load("New_models/torch_test/efficientnet_v2_l.ckpt", map_location='cpu')
 
 pipeline = joblib.load('stroke-prediction/model.joblib') 
 
@@ -272,11 +272,8 @@ def torch_combined_Predict():
 
 @app.route('/tabular/predict', methods=['POST'])
 def tabularPredict():
-    
-    X = pd.DataFrame(request.json)
 
-    with open ('testX.pickle', "wb") as f:
-        pickle.dump(X, f)
+    X = pd.DataFrame(request.json)
 
     numerical_features = ['age', 'avg_glucose_level', 'bmi']
 
@@ -285,15 +282,17 @@ def tabularPredict():
 
     shap_values = shap_explainer(X)
 
-    df = pd.DataFrame(shap_values.values, columns=X.columns)
+    df = pd.DataFrame(np.abs(shap_values.values), columns=X.columns)
     sorted_columns = df.abs().mean().sort_values(ascending=False).index
 
     result = tabular_model.predict(X)
-    
+    probability = tabular_model.predict_proba(X)
+
     df_sorted = df[sorted_columns]
     df_sorted['result'] = result[0]
+    df_sorted['probability_no_stroke'] = probability[0][0]
+    df_sorted['probability_stroke'] = probability[0][1]
     df_json = df_sorted.to_json(orient='records')
-
 
     #return_json = jsonify({"result": int(result[0])})
 

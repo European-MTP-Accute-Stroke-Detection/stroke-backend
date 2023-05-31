@@ -46,7 +46,7 @@ from Utilities.db_functions import *
 ########################### Preprocessing ################################################
 ##########################################################################################
 
-prefix = '/' if platform.system() == 'Windows' else ''
+prefix = '' if platform.system() == 'Windows' else ''
 
 def transform_to_hu(img, intercept, slope):
     """Transform raw pixel values in CT scans to the Hounsfield Units (HU)
@@ -871,7 +871,8 @@ def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
 
 def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, predict_id, case_id):
     path = (os.path.join(prefix +'static/temp/' + str(predict_id)+'/'))
-    os.mkdir(path)
+    if not os.path.exists(path):
+        os.mkdir(path)
     dicom_preprocess, data = apply_windowing(file)
     dicom_preprocess.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
 
