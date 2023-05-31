@@ -715,19 +715,19 @@ def explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, layer
 
     data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
     print(data_torch.shape)
-    prediction_torch = model_torch(data_torch)
     m = nn.Softmax()
+    prediction_torch = m(model_torch(data_torch))
 
-    prediction_com = model_com.predict(np.expand_dims(data, axis=0))
+    #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
     prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
     prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
 
-    lime_array = plotLIME(model_torch, data_torch[0], prediction_torch, 50, True)
-    prediction_torch = m(prediction_torch).detach().numpy()
+    lime_array = plotLIME(model_torch, data_torch[0], prediction_torch, 250, True)
+    prediction_torch = prediction_torch.detach().numpy()
     with open ('res.pickle', 'wb') as f:
         pickle.dump(lime_array, f)
 
-    res_com = np.round(prediction_com[0])
+    #res_com = np.round(prediction_com[0])
     res_hem = np.round(prediction_hem)[0]
     res_isch = np.round(prediction_isch)[0]
     res_com = np.round(prediction_torch)[0]
@@ -742,18 +742,18 @@ def explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, layer
     
     #cam_array = calculate_heatmap(heatmap, np.expand_dims(data, axis=0), predict_id)
 
-    if (res_com[0] == 1 and res_hem == 0 and res_isch == 0).all() :
+    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
         print_result = "No Stroke Detected"
-    elif (res_com[1] == 1 and res_hem == 0 and res_isch == 1).all() :
+    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
         print_result = "Ischemic Stroke Detected"
-    elif (res_com[2] == 1 and res_hem == 1 and res_isch == 0).all() :
-        print_result = "Ischemic Stroke Detected"
+    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
+        print_result = "Hemorrhage Stroke Detected"
     else:
         print_result = "Indication of Stroke"
 
     x = {
         "result": print_result,
-       "prediction_combined": str(prediction_com[0]),
+       "prediction_combined": str(prediction_torch[0]),
        "prediction_hemorrhage": str(prediction_hem[0]),
        "prediction_ischemic": str(prediction_isch[0])
         }
@@ -849,7 +849,7 @@ def explain_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
 
         store_results(static_path, case_id, 'segmentation', 'Cases/'+case_id+'/results/combined_lime_low/')
         store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
-    #shutil.rmtree(path = static_path)
+    shutil.rmtree(path = static_path)
 
 def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
     #runs a simple prediction on all scans in a given case
@@ -881,10 +881,11 @@ def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, pred
 
     data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
     print(data_torch.shape)
-    prediction_torch = model_torch(data_torch)
     m = nn.Softmax()
+    prediction_torch = m(model_torch(data_torch))
+    
 
-    prediction_com = model_com.predict(np.expand_dims(data, axis=0))
+    #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
     prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
     prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
 
@@ -894,24 +895,25 @@ def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, pred
     res_hem = np.round(prediction_hem)[0]
     res_isch = np.round(prediction_isch)[0]
     res_com = np.round(prediction_torch)[0]
+    print(res_com)
 
-    if (res_com[0] == 1 and res_hem == 0 and res_isch == 0).all() :
+    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
         print_result = "No Stroke Detected"
-    elif (res_com[1] == 1 and res_hem == 0 and res_isch == 1).all() :
+    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
         print_result = "Ischemic Stroke Detected"
-    elif (res_com[2] == 1 and res_hem == 1 and res_isch == 0).all() :
-        print_result = "Ischemic Stroke Detected"
+    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
+        print_result = "Hemorrhage Stroke Detected"
     else:
         print_result = "Indication of Stroke"
 
     x = {
         "result": print_result,
-        "prediction_combined": str(prediction_com[0]),
+        "prediction_combined": str(prediction_torch[0]),
         "prediction_hemorrhage": str(prediction_hem[0]),
         "prediction_ischemic": str(prediction_isch[0])
         }
     
-    prediction = {'combined': {'prediction': {'result': print_result, 'predictions': str(prediction_com[0])}},
+    prediction = {'combined': {'prediction': {'result': print_result, 'predictions': str(prediction_torch[0])}},
               'ischemic': {'prediction': {'result': print_result, 'predictions': str(prediction_isch[0])}},
               'hemorrhage': {'prediction': {'result': print_result, 'predictions': str(prediction_hem[0])}}}
     
