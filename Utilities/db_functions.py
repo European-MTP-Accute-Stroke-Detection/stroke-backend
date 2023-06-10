@@ -21,7 +21,6 @@ def store_results(path_to_save, id_patient, name, remote_directory_path):
             remote_file_path = os.path.join(remote_directory_path, local_file_path[len(path_to_save)+1:])
 
             if "json" in file:
-                print(local_file_path)
                 X = json.load(open(local_file_path))
                 db.collection(u'model-results').document(id_patient).set(X)
 

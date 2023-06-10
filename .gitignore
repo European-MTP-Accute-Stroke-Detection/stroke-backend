@@ -2,3 +2,5 @@ env
 __pycache__
 static
 New_models/torch_test
+testX.pickle
+venv

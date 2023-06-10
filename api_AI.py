@@ -1,9 +1,9 @@
 import os
 import json
-from flask import Flask, request, jsonify, flash, redirect, url_for, send_from_directory
+#from flask import Flask, request, jsonify, flash, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
-from flask_cors import CORS, cross_origin
-import pylibjpeg
+#from flask_cors import CORS, cross_origin
+#import pylibjpeg
 from pydicom import dcmread
 import scipy.ndimage as ndi
 import pandas as pd  
@@ -16,10 +16,10 @@ from random import randrange
 from tqdm.notebook import tqdm
 import pickle
 import cv2
-from PIL import Image
-import tensorflow as tf
+#from PIL import Image
+#import tensorflow as tf
 from autokeras.keras_layers import CastToFloat32
-from tensorflow import keras
+#from tensorflow import keras
 from skimage import morphology
 import torch
 import torch.nn as nn
@@ -31,12 +31,12 @@ import SimpleITK as sitk
 
 from keras.preprocessing import image
 from numpy import asarray
-import matplotlib.cm as cm
-from PIL import Image as im
+#import matplotlib.cm as cm
+#from PIL import Image as im
 import platform
 
-from lime import lime_image
-from lime.wrappers.scikit_image import SegmentationAlgorithm
+#from lime import lime_image
+#from lime.wrappers.scikit_image import SegmentationAlgorithm
 from skimage.segmentation import mark_boundaries, slic
 
 from Utilities.xai_functions import *
@@ -714,7 +714,6 @@ def explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, layer
     data = np.array(data).astype(np.float32)
 
     data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
-    print(data_torch.shape)
     m = nn.Softmax()
     prediction_torch = m(model_torch(data_torch))
 
@@ -787,8 +786,6 @@ def explain_AI_torch(file, id_xai, id_model, complexity, local_model, predict_id
     m = nn.Softmax()
     prediction = m(prediction_torch)
     
-    #print(np.round(prediction))
-
     if id_xai == 'lime':
         plotLIME(local_model, data_torch[0], prediction_torch, complexity, predict_id, True)
     # else:
@@ -839,16 +836,14 @@ def explain_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
 
     dicom_names = load_dicoms(case_id)
     static_path = "static/temp/"
-    print(dicom_names)
     for name in dicom_names:
         file = (static_path+name+'.dcm')
-        print(file)
-        print(name)
 
         explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, 'separable_conv2d_2', name, case_id)
 
         store_results(static_path, case_id, 'segmentation', 'Cases/'+case_id+'/results/combined_lime_low/')
         store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
+
     shutil.rmtree(path = static_path)
 
 def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
@@ -856,10 +851,8 @@ def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
 
     dicom_names = load_dicoms(case_id)
     static_path = "static/temp/"
-    print(dicom_names)
     for name in dicom_names:
         file = (static_path+name+'.dcm')
-        print(file)
 
         predict_AI_single(file, model_com, model_hem, model_isch, model_torch, name, case_id)
         store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
@@ -880,7 +873,6 @@ def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, pred
     data = np.array(data).astype(np.float32)
 
     data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
-    print(data_torch.shape)
     m = nn.Softmax()
     prediction_torch = m(model_torch(data_torch))
     
@@ -895,7 +887,6 @@ def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, pred
     res_hem = np.round(prediction_hem)[0]
     res_isch = np.round(prediction_isch)[0]
     res_com = np.round(prediction_torch)[0]
-    print(res_com)
 
     if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
         print_result = "No Stroke Detected"

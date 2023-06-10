@@ -11,7 +11,7 @@ from api_AI import *
 from Utilities.db_functions import *
 from Utilities.xai_functions import *
 import torch
-from catboost import CatBoostClassifier
+#from catboost import CatBoostClassifier
 
 sns.set_theme(style="whitegrid", palette="viridis")
     
@@ -199,7 +199,6 @@ def torch_explain(xai_id):
 
 @app.route('/predict_complete/<uid>', methods=['POST'])
 def predict_ai_complete(uid):
-    print(uid)
         
     predict_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
 
@@ -207,7 +206,6 @@ def predict_ai_complete(uid):
 
 @app.route('/explain_complete/<uid>', methods=['POST'])
 def explain_ai_complete(uid):
-    print(uid)
         
     explain_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
 

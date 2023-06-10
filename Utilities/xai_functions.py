@@ -5,8 +5,8 @@ from torch import nn
 import pandas as pd  
 import pydicom, numpy as np
 import matplotlib.pylab as plt
-import os
-import seaborn as sns
+#import os
+#import seaborn as sns
 from random import randrange
 from tqdm import tqdm
 import platform
@@ -22,11 +22,11 @@ import copy
 from keras.preprocessing import image
 from numpy import asarray
 import matplotlib.cm as cm
-from PIL import Image as im
-from lime import lime_image
+#from PIL import Image as im
+#from lime import lime_image
 from lime.wrappers.scikit_image import SegmentationAlgorithm
 from skimage.segmentation import mark_boundaries
-from skimage import morphology
+#from skimage import morphology
 import shap
 from functools import partial
 from sklearn.utils import check_random_state
