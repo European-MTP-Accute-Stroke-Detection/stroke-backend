@@ -44,6 +44,124 @@ app = Flask(__name__, static_folder=os.path.join('/static'))
 cors = CORS(app, resources={r"*": {"origins": "*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
 
+@app.route('/predict_complete/<uid>', methods=['POST'])
+def predict_ai_complete(uid):
+        
+    predict_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
+
+    return jsonify({"Done": 'done'})
+
+@app.route('/explain_complete/<uid>', methods=['POST'])
+def explain_ai_complete(uid):
+        
+    explain_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
+
+    return jsonify({"Done": 'done'})
+    
+
+@app.route('/tabular/predict', methods=['POST'])
+def tabularPredict():
+
+    X = pd.DataFrame(request.json)
+
+    numerical_features = ['age', 'avg_glucose_level', 'bmi']
+
+    for p in preprocessors:
+        X[numerical_features] = p.transform(X[numerical_features])
+
+    shap_values = shap_explainer(X)
+
+    df = pd.DataFrame(np.abs(shap_values.values), columns=X.columns)
+    sorted_columns = df.abs().mean().sort_values(ascending=False).index
+
+    result = tabular_model.predict(X)
+    probability = tabular_model.predict_proba(X)
+
+    df_sorted = df[sorted_columns]
+    df_sorted['result'] = result[0]
+    df_sorted['probability_no_stroke'] = probability[0][0]
+    df_sorted['probability_stroke'] = probability[0][1]
+    df_json = df_sorted.to_json(orient='records')
+
+    #return_json = jsonify({"result": int(result[0])})
+
+    return df_json
+
+
+if __name__ == '__main__':
+    # This is used when running locally only. When deploying to Google App
+    # Engine, a webserver process such as Gunicorn will serve the app. This
+    # can be configured by adding an `entrypoint` to app.yaml.
+    # Flask's development server will automatically serve static files in
+    # the "static" directory. See:
+    # http://flask.pocoo.org/docs/1.0/quickstart/#static-files. Once deployed,
+    # App Engine itself will serve those files as configured in app.yaml.
+    app.run(host='127.0.0.1', port=8080, debug=True)
+
+
+
+
+############################################################################################
+############################### Old Methods ################################################
+############################################################################################
+############################################################################################
+
+@app.route('/predict', methods=['POST'])
+def predict_ai():
+    if 'file' not in request.files:
+        return jsonify({'error':'media not provided'}), 400
+    file = request.files['file']
+    
+    id = str(uuid.uuid1())
+    
+    static_path = predict_AI(file, model_combined, model_hem, model_ischemic, id)
+    #static_path = execute_AI(file, 3, model_combined, 'separable_conv2d_2',id)
+    
+    store_results(static_path, id)
+
+    if file.filename == '':
+        return jsonify({'error': 'no file uploaded'}), 400
+    elif file and allowed_file(file.filename):
+        return jsonify({"predictionId": id})
+
+@app.route('/combined/predict', methods=['POST'])
+def combinedPredict():
+    if 'file' not in request.files:
+        return jsonify({'error':'media not provided'}), 400
+    file = request.files['file']
+    
+    id = str(uuid.uuid1())
+    
+    #static_path = predict_AI(file, model_combined, model_hem, model_ischemic, id)
+    static_path = execute_AI(file, 3, model_combined,id)
+    
+    store_results(static_path, id)
+
+    if file.filename == '':
+        return jsonify({'error': 'no file uploaded'}), 400
+    elif file and allowed_file(file.filename):
+        return jsonify({"predictionId": id})
+    
+
+@app.route('/torch/predict', methods=['POST'])
+def torch_combined_Predict():
+    if 'file' not in request.files:
+        return jsonify({'error':'media not provided'}), 400
+    file = request.files['file']
+    
+    id = str(uuid.uuid1())
+    
+    #static_path = predict_AI(file, model_combined, model_hem, model_ischemic, id)
+    static_path = execute_torch_AI(file, 3, model_torch,id)
+    
+    store_results(static_path, id)
+
+    if file.filename == '':
+        return jsonify({'error': 'no file uploaded'}), 400
+    elif file and allowed_file(file.filename):
+        return jsonify({"predictionId": id})
+    
+
 @app.route('/hemorrhage/predict', methods=['POST'])
 def hemorrhagePredict():
     if 'file' not in request.files:
@@ -196,113 +314,3 @@ def torch_explain(xai_id):
     elif file and allowed_file(file.filename):
          return jsonify({"predictionId": id})
     
-
-@app.route('/predict_complete/<uid>', methods=['POST'])
-def predict_ai_complete(uid):
-        
-    predict_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
-
-    return jsonify({"Done": 'done'})
-
-@app.route('/explain_complete/<uid>', methods=['POST'])
-def explain_ai_complete(uid):
-        
-    explain_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
-
-    return jsonify({"Done": 'done'})
-
-    
-@app.route('/predict', methods=['POST'])
-def predict_ai():
-    if 'file' not in request.files:
-        return jsonify({'error':'media not provided'}), 400
-    file = request.files['file']
-    
-    id = str(uuid.uuid1())
-    
-    static_path = predict_AI(file, model_combined, model_hem, model_ischemic, id)
-    #static_path = execute_AI(file, 3, model_combined, 'separable_conv2d_2',id)
-    
-    store_results(static_path, id)
-
-    if file.filename == '':
-        return jsonify({'error': 'no file uploaded'}), 400
-    elif file and allowed_file(file.filename):
-        return jsonify({"predictionId": id})
-
-@app.route('/combined/predict', methods=['POST'])
-def combinedPredict():
-    if 'file' not in request.files:
-        return jsonify({'error':'media not provided'}), 400
-    file = request.files['file']
-    
-    id = str(uuid.uuid1())
-    
-    #static_path = predict_AI(file, model_combined, model_hem, model_ischemic, id)
-    static_path = execute_AI(file, 3, model_combined,id)
-    
-    store_results(static_path, id)
-
-    if file.filename == '':
-        return jsonify({'error': 'no file uploaded'}), 400
-    elif file and allowed_file(file.filename):
-        return jsonify({"predictionId": id})
-    
-
-@app.route('/torch/predict', methods=['POST'])
-def torch_combined_Predict():
-    if 'file' not in request.files:
-        return jsonify({'error':'media not provided'}), 400
-    file = request.files['file']
-    
-    id = str(uuid.uuid1())
-    
-    #static_path = predict_AI(file, model_combined, model_hem, model_ischemic, id)
-    static_path = execute_torch_AI(file, 3, model_torch,id)
-    
-    store_results(static_path, id)
-
-    if file.filename == '':
-        return jsonify({'error': 'no file uploaded'}), 400
-    elif file and allowed_file(file.filename):
-        return jsonify({"predictionId": id})
-    
-
-@app.route('/tabular/predict', methods=['POST'])
-def tabularPredict():
-
-    X = pd.DataFrame(request.json)
-
-    numerical_features = ['age', 'avg_glucose_level', 'bmi']
-
-    for p in preprocessors:
-        X[numerical_features] = p.transform(X[numerical_features])
-
-    shap_values = shap_explainer(X)
-
-    df = pd.DataFrame(np.abs(shap_values.values), columns=X.columns)
-    sorted_columns = df.abs().mean().sort_values(ascending=False).index
-
-    result = tabular_model.predict(X)
-    probability = tabular_model.predict_proba(X)
-
-    df_sorted = df[sorted_columns]
-    df_sorted['result'] = result[0]
-    df_sorted['probability_no_stroke'] = probability[0][0]
-    df_sorted['probability_stroke'] = probability[0][1]
-    df_json = df_sorted.to_json(orient='records')
-
-    #return_json = jsonify({"result": int(result[0])})
-
-    return df_json
-
-
-if __name__ == '__main__':
-    # This is used when running locally only. When deploying to Google App
-    # Engine, a webserver process such as Gunicorn will serve the app. This
-    # can be configured by adding an `entrypoint` to app.yaml.
-    # Flask's development server will automatically serve static files in
-    # the "static" directory. See:
-    # http://flask.pocoo.org/docs/1.0/quickstart/#static-files. Once deployed,
-    # App Engine itself will serve those files as configured in app.yaml.
-    app.run(host='127.0.0.1', port=8080, debug=True)

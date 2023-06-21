@@ -3,6 +3,7 @@ from firebase_admin import credentials, storage
 from firebase_admin import firestore
 import os
 import json
+import numpy as np
 
 
 firebase_key = 'ServiceAccountKey/brainwatch-14583-firebase-adminsdk-67n85-57a14dcb73.json'
@@ -89,3 +90,53 @@ def load_dicoms(case_id):
             dicom_scans.append(local_blob.download_to_filename("static/temp/"+filename))
 
     return dicom_names
+
+def createJson(prediction, id_model, max_id = None):
+    
+    if id_model == 1:
+        if np.round(prediction).max() > 0:
+            x = {
+                "result": "Hemorrhage Stroke Detected",                
+                "prediction": str(prediction[0]),
+                "layer": str(max_id)
+                }
+        else:
+            x = {
+                "result": "No Hemorrhage Stroke Detected",
+                "prediction": str(prediction[0]),
+                "layer": str(max_id)
+                }
+    elif id_model == 2:
+        if np.round(prediction).max() > 0:
+            x = {
+                "result": "Ischemic Stroke Detected",
+                "prediction": str(prediction[0]),
+                "layer": str(max_id)
+                }
+        else:
+            x = {
+                "result": "No Ischemic Stroke Detected",
+                "prediction": str(prediction[0]),
+                "layer": str(max_id)
+                }
+    else:
+        if np.argmax(prediction) == 0:
+            x = {
+                "result": "No Stroke Detected",
+                "prediction": str(prediction[0]),
+                "layer": str(max_id)
+                }
+        elif np.argmax(prediction) == 1:
+            x = {
+                "result": "Hemorrhage Stroke Detected",
+                "prediction": str(prediction[0]),
+                "layer": str(max_id)
+                }
+        else:
+            x = {
+                "result": "Ischemic Stroke Detected",
+                "prediction": str(prediction[0]),
+                "layer": str(max_id)
+                }
+            
+    return x

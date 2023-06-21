@@ -17,7 +17,11 @@ from tensorflow import keras
 import sklearn
 import math
 import copy
+from scipy.ndimage import binary_erosion, binary_dilation
 
+from scipy.ndimage import label
+from skimage.measure import regionprops
+from scipy.ndimage import binary_fill_holes
 
 from keras.preprocessing import image
 from numpy import asarray
@@ -33,6 +37,53 @@ from sklearn.utils import check_random_state
 from lime import lime_base
 
 prefix = '/' if platform.system() == 'Windows' else ''
+
+
+def remove_noise(binary_array, erosion_iterations=2, dilation_iterations=1):
+    # Perform erosion to remove small foreground regions
+    eroded_array = binary_erosion(binary_array, iterations=erosion_iterations)
+    
+    # Perform dilation to restore the remaining foreground regions
+    dilated_array = binary_dilation(eroded_array, iterations=dilation_iterations)
+    
+    return dilated_array
+
+def remove_small_regions(binary_array, min_size=100):
+    # Label connected regions in the binary array
+    labeled_array, num_labels = label(binary_array)
+    
+    # Get properties of each labeled region
+    region_props = regionprops(labeled_array)
+    
+    # Create an empty array for the output
+    filtered_array = np.zeros_like(binary_array, dtype=bool)
+    
+    # Iterate over the regions and filter based on size
+    for region in region_props:
+        if region.area >= min_size:
+            filtered_array[labeled_array == region.label] = True
+    
+    return filtered_array
+
+def create_segmentation_mask(img):
+
+    mask = np.full((img.shape[0], img.shape[1]), False, dtype=bool)
+    #removes background and bone
+    for i in range(img.shape[0]):
+        for j in range(img.shape[1]):
+            if img[i][j][0] != 0 and img[i][j][1] != 0:
+                if img[i][j][0] != 1 and img[i][j][1] != 1:
+                    mask[i][j] = True
+
+    #removes noise
+    mask = remove_noise(mask)
+    #removes additional small noisy regions
+    mask = remove_small_regions(mask, min_size=200)
+    #removes small areas inside positive regions
+    final_mask = binary_fill_holes(mask)
+
+    return final_mask
+
 
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
@@ -126,14 +177,17 @@ def plotLIME(model, data, prediction, complexity, torch = False):
         explainer = LimeImageExplainer_torch() 
         m = nn.Softmax()
         prediction = m(prediction).cpu().detach().numpy()
+        data_seg = data.detach().numpy()
+        data_seg = np.transpose(data_seg, (1, 2, 0))
     else:
         explainer = LimeImageExplainer()        
+        data_seg = data
 
-    segmenter = SegmentationAlgorithm('slic', n_segments=200, compactness=5, sigma=1,
-                     start_label=1)
+    segmenter = SegmentationAlgorithm('slic', n_segments=50, compactness=5, sigma=1,
+                     start_label=1, mask = create_segmentation_mask(data_seg))
     explanation_1 = explainer.explain_instance(data, 
                                          classifier_fn = model, 
-                                         top_labels=5, 
+                                         top_labels=3, 
                                          hide_color=0, # 0 - gray 
                                          num_samples=complexity,
                                          segmentation_fn=segmenter
@@ -143,7 +197,7 @@ def plotLIME(model, data, prediction, complexity, torch = False):
                                                 num_features=5, 
                                                 hide_rest=False)
 
-    lime_res = mark_boundaries(temp, mask, mode = "thick", color = (255,0,0))
+    #lime_res = mark_boundaries(temp, mask, mode = "thick", color = (255,0,0))
     
     #imgplot = plt.imshow(lime_res)
     
@@ -151,7 +205,6 @@ def plotLIME(model, data, prediction, complexity, torch = False):
     #plt.savefig(prefix + 'static/' + predict_id + '/'+name+'.png', bbox_inches = 'tight')
     #plt.close()
     return mask
-
 
 class ImageExplanation(object):
     def __init__(self, image, segments):
@@ -712,3 +765,23 @@ def average_calibration_error(confs, preds, labels, num_bins=10):
             non_empty_bins += 1
         ace += abs(bin_accuracy - bin_confidence)
     return ace / float(non_empty_bins)
+
+def calculate_uncertainty(model, data, num_samples):
+    model_uncertainty = copy.deepcopy(model)
+    predictions = []
+
+    for _ in range(num_samples):
+        model_uncertainty.apply(lambda module: setattr(module, 'training', True))
+        # Forward pass
+        m = nn.Softmax()
+        output = m(model_uncertainty(data))
+        predictions.append(output)
+
+    # Convert predictions to a tensor
+    predictions = torch.stack(predictions)
+
+    # Calculate uncertainty
+    uncertainty = torch.std(predictions, dim=0, unbiased=False)
+
+    # Uncertainty tensor will have the same shape as the model's output
+    return uncertainty.detach().numpy()

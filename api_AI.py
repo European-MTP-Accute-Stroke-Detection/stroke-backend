@@ -320,54 +320,6 @@ def apply_windowing(data):
     
     return dicom_preprocess, img_preprocess
 
-def saveDICOM(data_array, old_dicom, name):
-    with open("rgb_array.pkl", "wb") as f:
-        pickle.dump(data_array, f)
-    #pic = Image.fromarray(data_array, 'RGB')
-
-    #pic = pic.convert('L')
-    #pic = np.array(pic)
-    
-    #img = Image.fromarray(data_array)
-    #upscaled_img = np.array(img.resize((512, 512), resample=Image.BILINEAR))
-    #pic = np.dot(upscaled_img[..., :3], [0.21, 0.72, 0.07]).astype(np.uint8)
-
-    old_dicom = pydicom.dcmread(old_dicom)
-    orig_size = data_array.shape
-    #old_data = old_dicom.pixel_array
-    desired_size = (512,512)
-
-    x_orig = np.arange(0, orig_size[1])
-    y_orig = np.arange(0, orig_size[0])
-    x_desired = np.linspace(0, orig_size[1]-1, desired_size[1])
-    y_desired = np.linspace(0, orig_size[0]-1, desired_size[0])
-
-    # create a 2D interpolation function
-    interp_func = interpolate.interp2d(x_orig, y_orig, data_array, kind='linear')
-
-    # use the interpolation function to resample the array
-    resampled_arr = interp_func(x_desired, y_desired)
-
-    with open("rgb_array_res.pkl", "wb") as f:
-        pickle.dump(resampled_arr, f)
-    
-    #min_val = old_data.min()
-    #max_val = old_data.max()
-
-    # calculate the scaling factor based on the input range and output range
-    #scale_factor = int((max_val - min_val) / (pic.max() - pic.min()))
-
-    # rescale the array using the scaling factor and the minimum value
-    #pic = (pic - pic.min()) * scale_factor + min_val
-    data = data_array #* resampled_arr
-    #data = resampled_arr*1000
-    old_dicom.PixelData = data.tobytes() 
-    old_dicom.Rows, old_dicom.Columns = data.shape
-    old_dicom.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-
-    old_dicom.save_as(name+'_.dcm')
-    return old_dicom
-
 def saveDICOM_MaskCOM(data, dicom, name):
     
     orig_size = data.shape
@@ -447,6 +399,203 @@ def saveDICOM_Mask(data, dicom, name):
 ##########################################################################################
 ############################ AI Execution ################################################
 ##########################################################################################
+
+
+def explain_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
+    #runs a simple explanation on all scans in a given case
+
+    dicom_names = load_dicoms(case_id)
+    static_path = "static/temp/"
+    for name in dicom_names:
+        file = (static_path+name+'.dcm')
+
+        explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, 'separable_conv2d_2', name, case_id)
+
+        store_results(static_path, case_id, 'segmentation', 'Cases/'+case_id+'/results/combined_lime_low/')
+        store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
+
+    shutil.rmtree(path = static_path)
+
+def explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, layer, predict_id, file_name):
+    
+    path = (os.path.join(prefix +'static/temp/' + str(predict_id)+'/'))
+    os.mkdir(path)
+    dicom_preprocess, data = apply_windowing(file)
+    dicom_preprocess.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    dicom_preprocess.save_as(prefix + 'static/temp/'+str(predict_id)+'_dicom_scan.dcm')
+
+
+    data = np.array(data).astype(np.float32)
+
+    data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
+    m = nn.Softmax()
+    prediction_torch = m(model_torch(data_torch))
+
+    #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
+    prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
+    prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
+
+    lime_array = plotLIME(model_torch, data_torch[0], prediction_torch, 10, True)
+    prediction_torch = prediction_torch.detach().numpy()
+    with open ('res.pickle', 'wb') as f:
+        pickle.dump(lime_array, f)
+
+    #res_com = np.round(prediction_com[0])
+    res_hem = np.round(prediction_hem)[0]
+    res_isch = np.round(prediction_isch)[0]
+    res_com = np.round(prediction_torch)[0]
+    
+    #lime_array = plotLIME(model_com, data, prediction_com, 100)
+
+    #heatmap = make_gradcam_heatmap(np.expand_dims(data, axis=0), model_com, layer)
+
+    # Grad-Cam will be replaced by SHAP
+    # To fully integrate SHAP, we need the final models to create the explainer.
+    # SHAP takes a lot of time to compute, meaning only execute it when explicitly wanted!
+    
+    #cam_array = calculate_heatmap(heatmap, np.expand_dims(data, axis=0), predict_id)
+
+    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
+        print_result = "No Stroke Detected"
+    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
+        print_result = "Ischemic Stroke Detected"
+    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
+        print_result = "Hemorrhage Stroke Detected"
+    else:
+        print_result = "Indication of Stroke"
+
+    #print(lime_array.shape)
+
+    saveDICOM_MaskCOM(lime_array, dicom_preprocess, prefix + 'static/temp/'+str(predict_id))
+    return prefix + 'static/' + predict_id
+
+def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
+    #runs a simple prediction on all scans in a given case
+
+    dicom_names = load_dicoms(case_id)
+    static_path = "static/temp/"
+    for name in dicom_names:
+        file = (static_path+name+'.dcm')
+
+        predict_AI_single(file, model_com, model_hem, model_isch, model_torch, name, case_id)
+        store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
+        
+
+    shutil.rmtree(path = static_path)
+
+    return None
+
+def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, predict_id, case_id):
+    path = (os.path.join(prefix +'static/temp/' + str(predict_id)+'/'))
+    if not os.path.exists(path):
+        os.mkdir(path)
+    dicom_preprocess, data = apply_windowing(file)
+    dicom_preprocess.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    dicom_preprocess.save_as(prefix + 'static/temp/'+str(predict_id)+'_dicom_scan.dcm')
+    data = np.array(data).astype(np.float32)
+
+    data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
+    m = nn.Softmax()
+    prediction_torch = m(model_torch(data_torch))
+    
+    uncertainties = calculate_uncertainty(model_torch, data_torch, 50)
+
+    #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
+    prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
+    prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
+
+    prediction_torch = prediction_torch.detach().numpy()
+    
+    #res_com = np.round(prediction_com[0])
+    res_hem = np.round(prediction_hem)[0]
+    res_isch = np.round(prediction_isch)[0]
+    res_com = np.round(prediction_torch)[0]
+
+    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
+        print_result = "No Stroke Detected"
+    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
+        print_result = "Ischemic Stroke Detected"
+    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
+        print_result = "Hemorrhage Stroke Detected"
+    else:
+        print_result = "Indication of Stroke"
+
+    x = {
+        "result": print_result,
+        "prediction_combined": str(prediction_torch[0]),
+        "prediction_hemorrhage": str(prediction_hem[0]),
+        "prediction_ischemic": str(prediction_isch[0])
+        }
+    
+    prediction = {'combined': {'prediction': {'result': print_result, 'predictions': str(prediction_torch[0]), 'uncertainty':str(uncertainties[0])}},
+              'ischemic': {'prediction': {'result': print_result, 'predictions': str(prediction_isch[0])}},
+              'hemorrhage': {'prediction': {'result': print_result, 'predictions': str(prediction_hem[0])}}}
+    
+    meta_info = {'filename': 'test123', 'key': '374784t2764'}
+
+    save_prediction(case_id, predict_id, prediction, meta_info)
+
+    json_string = json.dumps(x)
+    with open(prefix + 'static/temp/' + predict_id + '/result.json', 'w') as outfile:
+        outfile.write(json_string)
+    return prefix + 'static/temp/' + predict_id
+        
+
+
+############################################################################################
+############################### Old Methods ################################################
+############################################################################################
+############################################################################################
+
+def saveDICOM(data_array, old_dicom, name):
+    with open("rgb_array.pkl", "wb") as f:
+        pickle.dump(data_array, f)
+    #pic = Image.fromarray(data_array, 'RGB')
+
+    #pic = pic.convert('L')
+    #pic = np.array(pic)
+    
+    #img = Image.fromarray(data_array)
+    #upscaled_img = np.array(img.resize((512, 512), resample=Image.BILINEAR))
+    #pic = np.dot(upscaled_img[..., :3], [0.21, 0.72, 0.07]).astype(np.uint8)
+
+    old_dicom = pydicom.dcmread(old_dicom)
+    orig_size = data_array.shape
+    #old_data = old_dicom.pixel_array
+    desired_size = (512,512)
+
+    x_orig = np.arange(0, orig_size[1])
+    y_orig = np.arange(0, orig_size[0])
+    x_desired = np.linspace(0, orig_size[1]-1, desired_size[1])
+    y_desired = np.linspace(0, orig_size[0]-1, desired_size[0])
+
+    # create a 2D interpolation function
+    interp_func = interpolate.interp2d(x_orig, y_orig, data_array, kind='linear')
+
+    # use the interpolation function to resample the array
+    resampled_arr = interp_func(x_desired, y_desired)
+
+    with open("rgb_array_res.pkl", "wb") as f:
+        pickle.dump(resampled_arr, f)
+    
+    #min_val = old_data.min()
+    #max_val = old_data.max()
+
+    # calculate the scaling factor based on the input range and output range
+    #scale_factor = int((max_val - min_val) / (pic.max() - pic.min()))
+
+    # rescale the array using the scaling factor and the minimum value
+    #pic = (pic - pic.min()) * scale_factor + min_val
+    data = data_array #* resampled_arr
+    #data = resampled_arr*1000
+    old_dicom.PixelData = data.tobytes() 
+    old_dicom.Rows, old_dicom.Columns = data.shape
+    old_dicom.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    old_dicom.save_as(name+'_.dcm')
+    return old_dicom
 
 def execute_torch_AI(file, id_model, local_model, predict_id):
     
@@ -701,70 +850,6 @@ def explain_AI_old(file, id_model, local_model, layer, predict_id):
     #heatmap = make_gradcam_heatmap(np.expand_dims(data, axis=0), local_model, layer)
     #calculate_heatmap(heatmap, np.expand_dims(data, axis=0), predict_id)
 
-def explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, layer, predict_id, file_name):
-
-    path = (os.path.join(prefix +'static/temp/' + str(predict_id)+'/'))
-    os.mkdir(path)
-    dicom_preprocess, data = apply_windowing(file)
-    dicom_preprocess.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-
-    dicom_preprocess.save_as(prefix + 'static/temp/'+str(predict_id)+'_dicom_scan.dcm')
-
-
-    data = np.array(data).astype(np.float32)
-
-    data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
-    m = nn.Softmax()
-    prediction_torch = m(model_torch(data_torch))
-
-    #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
-    prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
-    prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
-
-    lime_array = plotLIME(model_torch, data_torch[0], prediction_torch, 250, True)
-    prediction_torch = prediction_torch.detach().numpy()
-    with open ('res.pickle', 'wb') as f:
-        pickle.dump(lime_array, f)
-
-    #res_com = np.round(prediction_com[0])
-    res_hem = np.round(prediction_hem)[0]
-    res_isch = np.round(prediction_isch)[0]
-    res_com = np.round(prediction_torch)[0]
-    
-    #lime_array = plotLIME(model_com, data, prediction_com, 100)
-
-    #heatmap = make_gradcam_heatmap(np.expand_dims(data, axis=0), model_com, layer)
-
-    # Grad-Cam will be replaced by SHAP
-    # To fully integrate SHAP, we need the final models to create the explainer.
-    # SHAP takes a lot of time to compute, meaning only execute it when explicitly wanted!
-    
-    #cam_array = calculate_heatmap(heatmap, np.expand_dims(data, axis=0), predict_id)
-
-    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
-        print_result = "No Stroke Detected"
-    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
-        print_result = "Ischemic Stroke Detected"
-    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
-        print_result = "Hemorrhage Stroke Detected"
-    else:
-        print_result = "Indication of Stroke"
-
-    x = {
-        "result": print_result,
-       "prediction_combined": str(prediction_torch[0]),
-       "prediction_hemorrhage": str(prediction_hem[0]),
-       "prediction_ischemic": str(prediction_isch[0])
-        }
-
-    json_string = json.dumps(x)
-    with open(prefix + 'static/temp/' + predict_id + '/result.json', 'w') as outfile:
-        outfile.write(json_string)
-
-    #print(lime_array.shape)
-
-    saveDICOM_MaskCOM(lime_array, dicom_preprocess, prefix + 'static/temp/'+str(predict_id))
-    return prefix + 'static/' + predict_id
 
 def explain_AI_torch(file, id_xai, id_model, complexity, local_model, predict_id):
 
@@ -829,144 +914,3 @@ def explain_AI(file, id_xai, id_model, complexity, local_model, layer, predict_i
     with open(prefix + 'static/' + predict_id + '/result.json', 'w') as outfile:
         outfile.write(json_string)
     return prefix + 'static/' + predict_id
-
-
-def explain_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
-    #runs a simple explanation on all scans in a given case
-
-    dicom_names = load_dicoms(case_id)
-    static_path = "static/temp/"
-    for name in dicom_names:
-        file = (static_path+name+'.dcm')
-
-        explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, 'separable_conv2d_2', name, case_id)
-
-        store_results(static_path, case_id, 'segmentation', 'Cases/'+case_id+'/results/combined_lime_low/')
-        store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
-
-    shutil.rmtree(path = static_path)
-
-def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
-    #runs a simple prediction on all scans in a given case
-
-    dicom_names = load_dicoms(case_id)
-    static_path = "static/temp/"
-    for name in dicom_names:
-        file = (static_path+name+'.dcm')
-
-        predict_AI_single(file, model_com, model_hem, model_isch, model_torch, name, case_id)
-        store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
-        
-
-    shutil.rmtree(path = static_path)
-
-    return None
-
-def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, predict_id, case_id):
-    path = (os.path.join(prefix +'static/temp/' + str(predict_id)+'/'))
-    if not os.path.exists(path):
-        os.mkdir(path)
-    dicom_preprocess, data = apply_windowing(file)
-    dicom_preprocess.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-
-    dicom_preprocess.save_as(prefix + 'static/temp/'+str(predict_id)+'_dicom_scan.dcm')
-    data = np.array(data).astype(np.float32)
-
-    data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
-    m = nn.Softmax()
-    prediction_torch = m(model_torch(data_torch))
-    
-
-    #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
-    prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
-    prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
-
-    prediction_torch = prediction_torch.detach().numpy()
-    
-    #res_com = np.round(prediction_com[0])
-    res_hem = np.round(prediction_hem)[0]
-    res_isch = np.round(prediction_isch)[0]
-    res_com = np.round(prediction_torch)[0]
-
-    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
-        print_result = "No Stroke Detected"
-    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
-        print_result = "Ischemic Stroke Detected"
-    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
-        print_result = "Hemorrhage Stroke Detected"
-    else:
-        print_result = "Indication of Stroke"
-
-    x = {
-        "result": print_result,
-        "prediction_combined": str(prediction_torch[0]),
-        "prediction_hemorrhage": str(prediction_hem[0]),
-        "prediction_ischemic": str(prediction_isch[0])
-        }
-    
-    prediction = {'combined': {'prediction': {'result': print_result, 'predictions': str(prediction_torch[0])}},
-              'ischemic': {'prediction': {'result': print_result, 'predictions': str(prediction_isch[0])}},
-              'hemorrhage': {'prediction': {'result': print_result, 'predictions': str(prediction_hem[0])}}}
-    
-    print(prediction)
-    meta_info = { 'filename': 'test123', 'key': '374784t2764'}
-
-
-    save_prediction(case_id, predict_id, prediction, meta_info)
-
-    json_string = json.dumps(x)
-    with open(prefix + 'static/temp/' + predict_id + '/result.json', 'w') as outfile:
-        outfile.write(json_string)
-    return prefix + 'static/temp/' + predict_id
-        
-
-def createJson(prediction, id_model, max_id = None):
-
-    if id_model == 1:
-        if np.round(prediction).max() > 0:
-            x = {
-                "result": "Hemorrhage Stroke Detected",                
-                "prediction": str(prediction[0]),
-                "layer": str(max_id)
-                }
-        else:
-            x = {
-                "result": "No Hemorrhage Stroke Detected",
-                "prediction": str(prediction[0]),
-                "layer": str(max_id)
-                }
-    elif id_model == 2:
-        if np.round(prediction).max() > 0:
-            x = {
-                "result": "Ischemic Stroke Detected",
-                "prediction": str(prediction[0]),
-                "layer": str(max_id)
-                }
-        else:
-            x = {
-                "result": "No Ischemic Stroke Detected",
-                "prediction": str(prediction[0]),
-                "layer": str(max_id)
-                }
-    else:
-        if np.argmax(prediction) == 0:
-            x = {
-                "result": "No Stroke Detected",
-                "prediction": str(prediction[0]),
-                "layer": str(max_id)
-                }
-        elif np.argmax(prediction) == 1:
-            x = {
-                "result": "Hemorrhage Stroke Detected",
-                "prediction": str(prediction[0]),
-                "layer": str(max_id)
-                }
-        else:
-            x = {
-                "result": "Ischemic Stroke Detected",
-                "prediction": str(prediction[0]),
-                "layer": str(max_id)
-                }
-            
-    return x
-
