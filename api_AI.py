@@ -1,9 +1,6 @@
 import os
 import json
-#from flask import Flask, request, jsonify, flash, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
-#from flask_cors import CORS, cross_origin
-#import pylibjpeg
 from pydicom import dcmread
 import scipy.ndimage as ndi
 import pandas as pd  
@@ -16,10 +13,7 @@ from random import randrange
 from tqdm.notebook import tqdm
 import pickle
 import cv2
-#from PIL import Image
-#import tensorflow as tf
 from autokeras.keras_layers import CastToFloat32
-#from tensorflow import keras
 from skimage import morphology
 import torch
 import torch.nn as nn
@@ -31,12 +25,8 @@ import SimpleITK as sitk
 
 from keras.preprocessing import image
 from numpy import asarray
-#import matplotlib.cm as cm
-#from PIL import Image as im
 import platform
 
-#from lime import lime_image
-#from lime.wrappers.scikit_image import SegmentationAlgorithm
 from skimage.segmentation import mark_boundaries, slic
 
 from Utilities.xai_functions import *
@@ -402,83 +392,124 @@ def saveDICOM_Mask(data, dicom, name):
 
 
 def explain_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
-    #runs a simple explanation on all scans in a given case
-
+    """
+    Runs a explanation with lime on the all files of case_id. The results get stored in the database
+    
+    """
     dicom_names = load_dicoms(case_id)
     static_path = "static/temp/"
-    for name in dicom_names:
+
+    for name in dicom_names: #loop through all instances
+
         file = (static_path+name+'.dcm')
 
+        #run explanation
         explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, 'separable_conv2d_2', name, case_id)
 
-        store_results(static_path, case_id, 'segmentation', 'Cases/'+case_id+'/results/combined_lime_low/')
+        #store results
+        store_results(static_path, case_id, 'segmentation', 'Cases/'+case_id+'/results/combined_lime_medium/')
         store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
 
     shutil.rmtree(path = static_path)
 
 def explain_AI_Simple(file, model_com, model_hem, model_isch, model_torch, layer, predict_id, file_name):
+    """
+    Runs a explanation with lime on the given file. The results get stored in the database
     
-    path = (os.path.join(prefix +'static/temp/' + str(predict_id)+'/'))
-    os.mkdir(path)
+    """
+
+    #create path and folder        
+    path = os.path.join(prefix, 'static/temp/', str(predict_id))
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception as e:
+        print(f"An error occurred while creating the directory: {e}")
+        return
+
+    # If the directory was not created successfully, delete the 'static/' path and retry
+    if not os.path.exists(path):
+        path_delete = os.path.join(prefix, 'static')
+        try:
+            shutil.rmtree(path_delete)
+        except Exception as e:
+            print(f"An error occurred while deleting the folder: {e}")
+            return
+
+        # Retry creating the directory after deleting the 'static/' path
+        try:
+            os.makedirs(path)
+        except Exception as e:
+            print(f"An error occurred while creating the directory: {e}")
+
+
+
+    # preprocessing
     dicom_preprocess, data = apply_windowing(file)
     dicom_preprocess.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
 
     dicom_preprocess.save_as(prefix + 'static/temp/'+str(predict_id)+'_dicom_scan.dcm')
 
-
     data = np.array(data).astype(np.float32)
 
+    # pytorch prediction
     data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
     m = nn.Softmax()
     prediction_torch = m(model_torch(data_torch))
 
+    # tensorflow predictions
     #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
     prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
     prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
 
-    lime_array = plotLIME(model_torch, data_torch[0], prediction_torch, 10, True)
+    #cloning torch data for lime
+    prediction_torch_lime = prediction_torch.clone()
+
+    # get array 
     prediction_torch = prediction_torch.detach().numpy()
-    with open ('res.pickle', 'wb') as f:
-        pickle.dump(lime_array, f)
+
 
     #res_com = np.round(prediction_com[0])
-    res_hem = np.round(prediction_hem)[0]
-    res_isch = np.round(prediction_isch)[0]
+    res_hem = np.round(prediction_hem)[0] #not used anymore
+    res_isch = np.round(prediction_isch)[0] #not used anymore
     res_com = np.round(prediction_torch)[0]
     
-    #lime_array = plotLIME(model_com, data, prediction_com, 100)
 
-    #heatmap = make_gradcam_heatmap(np.expand_dims(data, axis=0), model_com, layer)
-
-    # Grad-Cam will be replaced by SHAP
-    # To fully integrate SHAP, we need the final models to create the explainer.
-    # SHAP takes a lot of time to compute, meaning only execute it when explicitly wanted!
-    
-    #cam_array = calculate_heatmap(heatmap, np.expand_dims(data, axis=0), predict_id)
-
-    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
+    #based on the result, and if stroke was found, XAI gets executed and lime array gets stored as a result.
+    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():
         print_result = "No Stroke Detected"
-    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
+        lime_array = np.zeros((data.shape[0], data.shape[1]))
+        print("Skip Explanation!")
+    elif (res_com[0] == 0 and res_com[1] == 1 and res_com[2] == 0 ).all():
         print_result = "Ischemic Stroke Detected"
-    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
+        lime_array = plotLIME(model_torch, data_torch[0], prediction_torch_lime, 512, True)
+    elif (res_com[0] == 0 and res_com[1] == 0 and res_com[2] == 1 ).all():
         print_result = "Hemorrhage Stroke Detected"
+        lime_array = plotLIME(model_torch, data_torch[0], prediction_torch_lime, 512, True)
     else:
         print_result = "Indication of Stroke"
+        lime_array = plotLIME(model_torch, data_torch[0], prediction_torch_lime, 512, True)
 
-    #print(lime_array.shape)
-
+    #safe XAI as dicom mask
     saveDICOM_MaskCOM(lime_array, dicom_preprocess, prefix + 'static/temp/'+str(predict_id))
     return prefix + 'static/' + predict_id
 
 def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
+    """
+    Runs a prediction with all given models on the case id. The results get stored in the database
+    
+    """
     #runs a simple prediction on all scans in a given case
 
-    dicom_names = load_dicoms(case_id)
-    static_path = "static/temp/"
-    for name in dicom_names:
-        file = (static_path+name+'.dcm')
+    dicom_names = load_dicoms(case_id) #load dicom names
+    static_path = "static/temp/" #path for storing results of backend
 
+    # loop through all files
+    for name in dicom_names:
+
+        file = (static_path+name+'.dcm')
+        #predict
         predict_AI_single(file, model_com, model_hem, model_isch, model_torch, name, case_id)
+        #store
         store_results(static_path, case_id, 'dicom_scan', ('Cases/'+case_id+'/scans_preprocessed/'))
         
 
@@ -486,60 +517,84 @@ def predict_case_simple(case_id, model_com, model_hem, model_isch, model_torch):
 
     return None
 
+
 def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, predict_id, case_id):
+    """
+    Runs a prediction with all given models on the given file. The results get stored in the database
+    
+    """
+
+    #create path and folder
     path = (os.path.join(prefix +'static/temp/' + str(predict_id)+'/'))
     if not os.path.exists(path):
         os.mkdir(path)
+
+    #preprocessing
     dicom_preprocess, data = apply_windowing(file)
     dicom_preprocess.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-
     dicom_preprocess.save_as(prefix + 'static/temp/'+str(predict_id)+'_dicom_scan.dcm')
     data = np.array(data).astype(np.float32)
 
+    # run model that covers both stroke types
     data_torch = torch.from_numpy(np.expand_dims(np.moveaxis(data, -1, 0), axis=0)).to('cpu')
     m = nn.Softmax()
     prediction_torch = m(model_torch(data_torch))
     
+    # calculate uncertainties
     uncertainties = calculate_uncertainty(model_torch, data_torch, 50)
 
-    #prediction_com = model_com.predict(np.expand_dims(data, axis=0))
+    # predict results
     prediction_hem = model_hem.predict(np.expand_dims(data, axis=0))    
     prediction_isch = model_isch.predict(np.expand_dims(data, axis=0))
-
     prediction_torch = prediction_torch.detach().numpy()
-    
-    #res_com = np.round(prediction_com[0])
+
+    #predictions, but only the one from torch will be used, since it performs best and incorporates all two stroke types    
     res_hem = np.round(prediction_hem)[0]
     res_isch = np.round(prediction_isch)[0]
     res_com = np.round(prediction_torch)[0]
 
-    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():##and res_hem == 0 and res_isch == 0).all() :
+    #to see predictions in backend for testing purposes
+    print(prediction_torch)
+    print(res_com)
+
+    # get stroke result as string
+    if (res_com[0] == 1 and res_com[1] == 0 and res_com[2] == 0 ).all():
         print_result = "No Stroke Detected"
-    elif (res_com[1] == 1 and res_com[0] == 0 and res_com[2] == 0 ).all():# and res_hem == 0 and res_isch == 1).all() :
+    elif (res_com[0] == 0 and res_com[1] == 1 and res_com[2] == 0 ).all():
         print_result = "Ischemic Stroke Detected"
-    elif (res_com[2] == 1 and res_com[1] == 0 and res_com[0] == 0 ).all():# and res_hem == 1 and res_isch == 0).all() :
+    elif (res_com[0] == 0 and res_com[1] == 0 and res_com[2] == 1 ).all():
         print_result = "Hemorrhage Stroke Detected"
     else:
         print_result = "Indication of Stroke"
 
+    #required to present result in right format in front-end
+    prediction_torch[0][1] = 1 - prediction_torch[0][1]
+    prediction_torch[0][2] = 1 - prediction_torch[0][2]
+
+    #create dictionary with results for json
     x = {
         "result": print_result,
         "prediction_combined": str(prediction_torch[0]),
         "prediction_hemorrhage": str(prediction_hem[0]),
         "prediction_ischemic": str(prediction_isch[0])
         }
-    
+
+    #create dictionary with results for database
     prediction = {'combined': {'prediction': {'result': print_result, 'predictions': str(prediction_torch[0]), 'uncertainty':str(uncertainties[0])}},
               'ischemic': {'prediction': {'result': print_result, 'predictions': str(prediction_isch[0])}},
               'hemorrhage': {'prediction': {'result': print_result, 'predictions': str(prediction_hem[0])}}}
-    
+
+    # Test to see wether we can safe meta data in file, but artifact
     meta_info = {'filename': 'test123', 'key': '374784t2764'}
 
+    # save predicitons
     save_prediction(case_id, predict_id, prediction, meta_info)
 
+    # save json, but artifact
     json_string = json.dumps(x)
     with open(prefix + 'static/temp/' + predict_id + '/result.json', 'w') as outfile:
         outfile.write(json_string)
+
     return prefix + 'static/temp/' + predict_id
         
 
@@ -548,6 +603,28 @@ def predict_AI_single (file, model_com, model_hem, model_isch, model_torch, pred
 ############################### Old Methods ################################################
 ############################################################################################
 ############################################################################################
+
+"""
+Deprecated Methods:
+
+In the current version of our application, we have made some changes to improve user experience 
+and simplify AI predictions. As a result, certain methods have been deprecated and are no longer 
+included. The decision to deprecate these methods was based on the understanding that fine-grained 
+AI predictions were proving to be overly complex for our users. In the interest of streamlining 
+the functionality and making it more user-friendly, we have removed these methods from the current version.
+While these deprecated methods are no longer actively supported, we have retained them in the codebase 
+for the sake of completeness and to ensure a smooth transition for existing users.
+
+Missing Visualization Functionalities:
+Additionally, we acknowledge that the frontend of our application currently lacks certain visualization 
+functionalities. In the previous version, we had implemented some visualization features to 
+enhance the user experience and provide a better understanding of the AI predictions.
+However, due to various technical constraints and usability concerns, these visualization functionalities 
+have been temporarily removed in the current version.
+
+
+"""
+
 
 def saveDICOM(data_array, old_dicom, name):
     with open("rgb_array.pkl", "wb") as f:
@@ -844,11 +921,6 @@ def explain_AI_old(file, id_model, local_model, layer, predict_id):
     
     print(np.round(prediction))
 
-    #plotLIME(local_model, data, prediction, predict_id)
-
-    
-    #heatmap = make_gradcam_heatmap(np.expand_dims(data, axis=0), local_model, layer)
-    #calculate_heatmap(heatmap, np.expand_dims(data, axis=0), predict_id)
 
 
 def explain_AI_torch(file, id_xai, id_model, complexity, local_model, predict_id):

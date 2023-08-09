@@ -5,19 +5,19 @@ from torch import nn
 import pandas as pd  
 import pydicom, numpy as np
 import matplotlib.pylab as plt
-#import os
-#import seaborn as sns
+import concurrent.futures
+
 from random import randrange
 from tqdm import tqdm
 import platform
 from PIL import Image
 import tensorflow as tf
 from tensorflow import keras
-#from copy import copy, deepcopy
 import sklearn
 import math
 import copy
 from scipy.ndimage import binary_erosion, binary_dilation
+import multiprocessing
 
 from scipy.ndimage import label
 from skimage.measure import regionprops
@@ -26,15 +26,15 @@ from scipy.ndimage import binary_fill_holes
 from keras.preprocessing import image
 from numpy import asarray
 import matplotlib.cm as cm
-#from PIL import Image as im
-#from lime import lime_image
 from lime.wrappers.scikit_image import SegmentationAlgorithm
 from skimage.segmentation import mark_boundaries
-#from skimage import morphology
 import shap
 from functools import partial
 from sklearn.utils import check_random_state
 from lime import lime_base
+
+from scipy.ndimage.measurements import label
+from scipy.spatial.distance import pdist, squareform
 
 prefix = '/' if platform.system() == 'Windows' else ''
 
@@ -81,6 +81,55 @@ def create_segmentation_mask(img):
     mask = remove_small_regions(mask, min_size=200)
     #removes small areas inside positive regions
     final_mask = binary_fill_holes(mask)
+
+    return final_mask
+
+def calculate_diameter(binary_array):
+    # Label connected components in the binary array
+    labeled_array, num_features = label(binary_array)
+    
+    # Find the labels of the connected components
+    labels = np.unique(labeled_array)[1:]  # Exclude background label 0
+    
+    max_diameter = 0
+    
+    # Iterate through each label and calculate the diameter
+    for label_val in labels:
+        # Extract the connected component for the current label
+        component = np.where(labeled_array == label_val, 1, 0)
+        
+        # Find the boundary points of the connected component
+        boundary_points = np.argwhere(component == 1)
+        
+        # Calculate the pairwise distances between the boundary points
+        pairwise_distances = pdist(boundary_points, metric='euclidean')
+        
+        # Find the maximum distance between any two boundary points
+        if len(pairwise_distances) > 0:
+            max_component_diameter = np.max(pairwise_distances)
+            max_diameter = max(max_diameter, max_component_diameter)
+    
+    return max_diameter
+
+def create_crucial_segmentation_mask(img):
+    
+    mask = create_segmentation_mask(img)
+
+    final_mask = copy.deepcopy(mask)
+
+    zero_coords = np.where(mask == False)
+
+    _threshold = int(calculate_diameter(mask)*1/5)
+    print(_threshold)
+
+    for x, y in np.ndindex(mask.shape):
+        # Calculate the distances to the pixels with value 0
+        distances = np.sqrt((x - zero_coords[0])**2 + (y - zero_coords[1])**2)
+        
+        # Check if the minimum distance is greater than the threshold distance
+        if np.min(distances) >= _threshold:
+            # Change the value of the pixel
+            final_mask[x, y] = False
 
     return final_mask
 
@@ -183,21 +232,24 @@ def plotLIME(model, data, prediction, complexity, torch = False):
         explainer = LimeImageExplainer()        
         data_seg = data
 
-    segmenter = SegmentationAlgorithm('slic', n_segments=50, compactness=5, sigma=1,
-                     start_label=1, mask = create_segmentation_mask(data_seg))
+    segmenter = SegmentationAlgorithm('slic', n_segments=16, compactness=10, sigma=2,
+                     start_label=1, mask = create_crucial_segmentation_mask(data_seg))
     explanation_1 = explainer.explain_instance(data, 
                                          classifier_fn = model, 
-                                         top_labels=3, 
+                                         top_labels=5, 
+                                         num_features = 64,
+                                         batch_size =128,
                                          hide_color=0, # 0 - gray 
                                          num_samples=complexity,
                                          segmentation_fn=segmenter
                                         )
-    temp, mask = explanation_1.get_image_and_mask(explanation_1.top_labels[np.argmax(prediction)], 
-                                                positive_only=True, 
-                                                num_features=5, 
+    temp, mask = explanation_1.get_image_and_mask(explanation_1.top_labels[0], 
+                                                positive_only=True,
+                                                negative_only=False,
+                                                num_features=2, 
                                                 hide_rest=False)
 
-    #lime_res = mark_boundaries(temp, mask, mode = "thick", color = (255,0,0))
+    lime_res = mark_boundaries(temp, mask, mode = "thick", color = (255,0,0))
     
     #imgplot = plt.imshow(lime_res)
     
@@ -554,6 +606,7 @@ class LimeImageExplainer_torch(object):
         
 
         fudged_image = image.numpy().copy()
+        fudged_image = np.transpose(fudged_image, (1, 2, 0))
         if hide_color is None:
             for x in np.unique(segments):
                 fudged_image[segments == x] = (
@@ -563,6 +616,7 @@ class LimeImageExplainer_torch(object):
         else:
             fudged_image[:] = hide_color
             
+
         fudged_image = np.moveaxis(fudged_image, 0, -1)
 
         top = labels
@@ -578,10 +632,12 @@ class LimeImageExplainer_torch(object):
         ).ravel()
 
         ret_exp = ImageExplanation(image, segments)
+
         if top_labels:
             top = np.argsort(labels[0])[-top_labels:]
             ret_exp.top_labels = list(top)
             ret_exp.top_labels.reverse()
+
         for label in top:
             (ret_exp.intercept[label],
              ret_exp.local_exp[label],
@@ -617,6 +673,11 @@ class LimeImageExplainer_torch(object):
                 data: dense num_samples * num_superpixels
                 labels: prediction probabilities matrix
         """
+        def predict(imgs):
+            m = nn.Softmax()
+            preds = m(classifier_fn(torch.squeeze(torch.from_numpy(np.array(imgs)))))
+            return preds
+
         n_features = np.unique(segments).shape[0]
         data = self.random_state.randint(0, 2, num_samples * n_features)\
             .reshape((num_samples, n_features))
@@ -626,25 +687,56 @@ class LimeImageExplainer_torch(object):
         rows = tqdm(data) if progress_bar else data
         for row in rows:
             temp = copy.deepcopy(np.moveaxis(image.cpu().detach().numpy(), 0, -1))
-            temp_ = copy.deepcopy(image)
+            fudged_image_ = np.transpose(copy.deepcopy(fudged_image), (0,2,1))
+            #temp_ = copy.deepcopy(image)
             zeros = np.where(row == 0)[0]
             mask = np.zeros(segments.shape).astype(bool)
             for z in zeros:
-                mask[segments == z] = True
-            #print(temp.shape)
-            #print(fudged_image.shape)
-            #print(mask.shape)
-            temp[mask] = fudged_image[mask]
-            #print(temp_.shape)
-            imgs.append(np.array(temp_))
+                if z != 0:
+                    mask[segments == z] = True
+            #if num % 2 == 0:
+            #    temp[mask] = temp[mask]*[0.2, 0.8, 0.8]#*(fudged_image_[mask].25)
+            #else:
+            #    temp[mask] = temp[mask]*[1.1, 1.1, 1.1]#*(fudged_image_[mask].25)
+            temp[mask] = temp[mask] - ((1/(1+np.exp(-temp[mask]+fudged_image_[mask])))-0.5)*2
+
+
+            imgs.append(np.transpose(np.array(temp),(2,1,0)))
             if len(imgs) == batch_size:
-                #print(np.array(imgs).shape)
-                preds = classifier_fn(torch.squeeze(torch.from_numpy(np.array(imgs))))
-                labels.extend(preds)
+                num_processes = multiprocessing.cpu_count()
+                chunk_size = len(imgs) // num_processes
+                chunks = [imgs[i:i+chunk_size] for i in range(0, len(imgs), chunk_size)]
+
+                # Create a thread pool executor
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=num_processes)
+
+                # Submit the predict function to the executor for each chunk
+                results = [executor.submit(predict, chunk) for chunk in chunks]
+
+                # Retrieve the results from the executor
+                predictions = []
+                for future in concurrent.futures.as_completed(results):
+                    prediction = future.result()
+                    predictions.extend(prediction)
+
+                labels.extend(predictions)
                 imgs = []
         if len(imgs) > 0:
-            preds = classifier_fn(torch.squeeze(torch.torch.from_numpy(np.array(imgs))))
-            labels.extend(preds)
+            num_processes = multiprocessing.cpu_count()
+            chunk_size = len(imgs) // num_processes
+            chunks = [imgs[i:i+chunk_size] for i in range(0, len(imgs), chunk_size)]
+                
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=num_processes)
+
+                # Submit the predict function to the executor for each chunk
+            results = [executor.submit(predict, chunk) for chunk in chunks]
+
+                # Retrieve the results from the executor
+            predictions = []
+            for future in concurrent.futures.as_completed(results):
+                prediction = future.result()
+                predictions.extend(prediction)
+            labels.extend(predictions)
             
         final_labels = []
         m = nn.Softmax()
@@ -682,95 +774,33 @@ def get_XAI_info(xai_id):
 
 ######### Uncertainty Quantification
 
-
-# Link: https://github.com/ondrejbohdal/meta-calibration/blob/main/Metrics/metrics.py
-
-COUNT = 'count'
-CONF = 'conf'
-ACC = 'acc'
-BIN_ACC = 'bin_acc'
-BIN_CONF = 'bin_conf'
-
-
-def _bin_initializer(bin_dict, num_bins=10):
-    for i in range(num_bins):
-        bin_dict[i][COUNT] = 0
-        bin_dict[i][CONF] = 0
-        bin_dict[i][ACC] = 0
-        bin_dict[i][BIN_ACC] = 0
-        bin_dict[i][BIN_CONF] = 0
-
-
-def _populate_bins(confs, preds, labels, num_bins=10):
-    bin_dict = {}
-    for i in range(num_bins):
-        bin_dict[i] = {}
-    _bin_initializer(bin_dict, num_bins)
-    num_test_samples = len(confs)
-
-    for i in range(0, num_test_samples):
-        confidence = confs[i]
-        prediction = preds[i]
-        label = labels[i]
-        binn = int(math.ceil(((num_bins * confidence) - 1)))
-        bin_dict[binn][COUNT] = bin_dict[binn][COUNT] + 1
-        bin_dict[binn][CONF] = bin_dict[binn][CONF] + confidence
-        bin_dict[binn][ACC] = bin_dict[binn][ACC] + \
-            (1 if (label == prediction) else 0)
-
-    for binn in range(0, num_bins):
-        if (bin_dict[binn][COUNT] == 0):
-            bin_dict[binn][BIN_ACC] = 0
-            bin_dict[binn][BIN_CONF] = 0
-        else:
-            bin_dict[binn][BIN_ACC] = float(
-                bin_dict[binn][ACC]) / bin_dict[binn][COUNT]
-            bin_dict[binn][BIN_CONF] = bin_dict[binn][CONF] / \
-                float(bin_dict[binn][COUNT])
-    return bin_dict
-
-
-def expected_calibration_error(confs, preds, labels, num_bins=10):
-    bin_dict = _populate_bins(confs, preds, labels, num_bins)
-    num_samples = len(labels)
-    ece = 0
-    for i in range(num_bins):
-        bin_accuracy = bin_dict[i][BIN_ACC]
-        bin_confidence = bin_dict[i][BIN_CONF]
-        bin_count = bin_dict[i][COUNT]
-        ece += (float(bin_count) / num_samples) * \
-            abs(bin_accuracy - bin_confidence)
-    return ece
-
-
-def maximum_calibration_error(confs, preds, labels, num_bins=10):
-    bin_dict = _populate_bins(confs, preds, labels, num_bins)
-    ce = []
-    for i in range(num_bins):
-        bin_accuracy = bin_dict[i][BIN_ACC]
-        bin_confidence = bin_dict[i][BIN_CONF]
-        ce.append(abs(bin_accuracy - bin_confidence))
-    return max(ce)
-
-
-def average_calibration_error(confs, preds, labels, num_bins=10):
-    bin_dict = _populate_bins(confs, preds, labels, num_bins)
-    non_empty_bins = 0
-    ace = 0
-    for i in range(num_bins):
-        bin_accuracy = bin_dict[i][BIN_ACC]
-        bin_confidence = bin_dict[i][BIN_CONF]
-        bin_count = bin_dict[i][COUNT]
-        if bin_count > 0:
-            non_empty_bins += 1
-        ace += abs(bin_accuracy - bin_confidence)
-    return ace / float(non_empty_bins)
-
 def calculate_uncertainty(model, data, num_samples):
+    """
+    The calculate_uncertainty method is designed to assess the uncertainty of the provided data using a 
+    specified pytorch machine learning model. The parameter num_samples denotes the number of iterations 
+    the model will be run to compute the uncertainty measure. We apply the monte carlo dropout.
+
+    Parameters:
+
+    - data: The input data for which uncertainty needs to be evaluated. This data should 
+    be compatible with the model's input format.
+    - num_samples: The number of iterations or samples to be used in the uncertainty estimation 
+    process. A higher value of num_samples typically leads to more accurate uncertainty assessments 
+    but may also increase computation time.
+    - model: The pre-trained machine learning model used to make predictions on the given data. 
+    This model should have dropout layers for a correct calculation.
+    
+    Return Value:
+
+    The method returns a measure of uncertainty for each data point in the input, 
+    providing valuable insights into the reliability of the model's predictions. 
+    Higher uncertainty values indicate less confidence in the predictions, while 
+    lower values suggest more reliable predictions.   
+    """
     model_uncertainty = copy.deepcopy(model)
     predictions = []
 
-    for _ in range(num_samples):
+    for _ in tqdm(range(num_samples)):
         model_uncertainty.apply(lambda module: setattr(module, 'training', True))
         # Forward pass
         m = nn.Softmax()
@@ -780,8 +810,11 @@ def calculate_uncertainty(model, data, num_samples):
     # Convert predictions to a tensor
     predictions = torch.stack(predictions)
 
-    # Calculate uncertainty
+    # Calculate uncertainty by standard deviation
     uncertainty = torch.std(predictions, dim=0, unbiased=False)
+    uncertainty_numpy = uncertainty.detach().numpy()
+
+    print(uncertainty_numpy)
 
     # Uncertainty tensor will have the same shape as the model's output
-    return uncertainty.detach().numpy()
+    return uncertainty_numpy

@@ -11,28 +11,35 @@ from api_AI import *
 from Utilities.db_functions import *
 from Utilities.xai_functions import *
 import torch
-#from catboost import CatBoostClassifier
 
 sns.set_theme(style="whitegrid", palette="viridis")
     
-model_hem = tf.keras.models.load_model('hemorrhage_clf', compile=False)
-model_ischemic = tf.keras.models.load_model('New_models/Ischemic', compile=False)
-model_combined = tf.keras.models.load_model('New_models/Combined', compile=False)
-model_torch = torch.load("New_models/torch_test/efficientnet_v2_l.ckpt", map_location='cpu')
 
-pipeline = joblib.load('stroke-prediction/model.joblib') 
+###################################### AI Models #############################################
 
-with open ("preprocessors_catboost.pickle", "rb") as f:
+model_hem = tf.keras.models.load_model('AI_models/hemorrhage_clf', compile=False)
+model_ischemic = tf.keras.models.load_model('AI_models/Ischemic', compile=False)
+
+model_combined = tf.keras.models.load_model('AI_models/Combined', compile=False)
+
+#model_torch = torch.load("AI_models/torch_test/vit_l_16.ckpt", map_location='cpu')
+model_torch = torch.load("AI_models/torch_test/efficientnet_v2_l.ckpt", map_location='cpu')
+
+
+with open ("tabular-prediction/preprocessors_catboost.pickle", "rb") as f:
     preprocessors = pickle.load(f)
 
-with open ("hypertuned-catboost.pickle", "rb") as f:
+with open ("tabular-prediction/hypertuned-catboost.pickle", "rb") as f:
     tabular_model = pickle.load(f)
+
+###################################### SHAP Model #############################################
+# used for tabular classifier
 
 with open ("shap_explainer.pickle", "rb") as f:
     shap_explainer = pickle.load(f)
 
+#check for allowed file formats
 ALLOWED_EXTENSIONS = {'dcm'}
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -40,10 +47,12 @@ def allowed_file(filename):
 
 print(os.path.join('/static'))
 app = Flask(__name__, static_folder=os.path.join('/static'))
-# app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 cors = CORS(app, resources={r"*": {"origins": "*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
 
+###################################### Methods #############################################
+
+# predicts complete patient by its uid
 @app.route('/predict_complete/<uid>', methods=['POST'])
 def predict_ai_complete(uid):
         
@@ -51,40 +60,48 @@ def predict_ai_complete(uid):
 
     return jsonify({"Done": 'done'})
 
+
+# explains complete patient by its uid
 @app.route('/explain_complete/<uid>', methods=['POST'])
 def explain_ai_complete(uid):
-        
-    explain_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
 
+    explain_case_simple(uid, model_combined, model_hem, model_ischemic, model_torch)
+                        
     return jsonify({"Done": 'done'})
     
+# runs tabular classifier
 
 @app.route('/tabular/predict', methods=['POST'])
 def tabularPredict():
 
-    X = pd.DataFrame(request.json)
+    X = pd.DataFrame(request.json) #get json from frontent and put it in dataframe
 
+    # numerical features for preprocessing
     numerical_features = ['age', 'avg_glucose_level', 'bmi']
 
+    # numerical features preprocessing
     for p in preprocessors:
         X[numerical_features] = p.transform(X[numerical_features])
 
+    # get shapley values
     shap_values = shap_explainer(X)
 
+    # put shapley values into datafrrrame and sort them by absoute decreasing
     df = pd.DataFrame(np.abs(shap_values.values), columns=X.columns)
     sorted_columns = df.abs().mean().sort_values(ascending=False).index
 
+    # predict result of model and its probability
     result = tabular_model.predict(X)
     probability = tabular_model.predict_proba(X)
 
+    # write everything (Xai, prediction and probabilty) into json for frontend visualization
     df_sorted = df[sorted_columns]
     df_sorted['result'] = result[0]
     df_sorted['probability_no_stroke'] = probability[0][0]
     df_sorted['probability_stroke'] = probability[0][1]
     df_json = df_sorted.to_json(orient='records')
 
-    #return_json = jsonify({"result": int(result[0])})
-
+    #returns it back to frontend
     return df_json
 
 
@@ -105,6 +122,27 @@ if __name__ == '__main__':
 ############################### Old Methods ################################################
 ############################################################################################
 ############################################################################################
+
+"""
+Deprecated Methods:
+
+In the current version of our application, we have made some changes to improve user experience 
+and simplify AI predictions. As a result, certain methods have been deprecated and are no longer 
+included. The decision to deprecate these methods was based on the understanding that fine-grained 
+AI predictions were proving to be overly complex for our users. In the interest of streamlining 
+the functionality and making it more user-friendly, we have removed these methods from the current version.
+While these deprecated methods are no longer actively supported, we have retained them in the codebase 
+for the sake of completeness and to ensure a smooth transition for existing users.
+
+Missing Visualization Functionalities:
+Additionally, we acknowledge that the frontend of our application currently lacks certain visualization 
+functionalities. In the previous version, we had implemented some visualization features to 
+enhance the user experience and provide a better understanding of the AI predictions.
+However, due to various technical constraints and usability concerns, these visualization functionalities 
+have been temporarily removed in the current version.
+
+
+"""
 
 @app.route('/predict', methods=['POST'])
 def predict_ai():
